@@ -11,6 +11,11 @@ use fork::Fork;
 use sandbox;
 use sandbox::Annotatable;
 
+struct Args {
+    cmd: String,
+    args: Vec<String>,
+}
+
 fn write_file(name: &str, buf: &[u8]) -> io::Result<()> {
     let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))?;
     file.write_all(buf)
@@ -32,7 +37,7 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
     exit(sandbox::park(pid)?);
 }
 
-fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
+fn handle_child(mut toparent: net::TcpStream, args: Args) -> Result<(), Box<dyn Error>> {
 
     sandbox::unshare(libc::CLONE_NEWNS|libc::CLONE_NEWPID|libc::CLONE_NEWUSER|libc::CLONE_NEWCGROUP)
     .map_err(|err| { err.annotate("unshare") })?;
@@ -52,7 +57,7 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
         exit(sandbox::park(pid)?);
     }
     Ok(Fork::Child) => {
-        handle_grandchild().expect("grandchild error");
+        handle_grandchild(args).expect("grandchild error");
         exit(0);
     }
     Err(e) => {
@@ -62,28 +67,43 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn handle_grandchild() -> Result<(), Box<dyn Error>> {
+fn handle_grandchild(args: Args) -> Result<(), Box<dyn Error>>  {
     // we are PID 1 with full capabilities
 
     let cwd = env::current_dir()?;
 
-    let def = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
+    let noopt = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
 
     sandbox::mount(&"", &"/", &"", libc::MS_REC|libc::MS_SLAVE, None)?;
 
     fs::create_dir_all(Path::new("/proc"))?;
-    sandbox::mount(&"none", &"/proc", &"proc", def, None)?;
+    sandbox::mount(&"none", &"/proc", &"proc", noopt, None)?;
 
-    fs::create_dir_all(Path::new("/sys/fs/cgroup/unified"))?;
-    sandbox::mount(&"none", &"/sys/fs/cgroup/unified", &"cgroup2", def, None)?;
+    //fs::create_dir_all(Path::new("/sys/fs/cgroup/unified"))?;
+    //sandbox::mount(&"none", &"/sys/fs/cgroup/unified", &"cgroup2", noopt, None)?;
 
     fs::create_dir_all(Path::new("/tmp"))?;
-    sandbox::mount(&"none", &"/tmp", &"tmpfs", def, None)?;
+    sandbox::mount(&"none", &"/tmp", &"tmpfs", noopt, None)?;
 
-    Ok(())
+    sandbox::Exec::new(args.cmd)?
+                    .args(args.args)?
+                    .exec()?;
+
+    Ok(()) // never reached
 }
 
 fn main() {
+    let rawargs = env::args().collect::<Vec<String>>();
+    if rawargs.len()<=1 {
+        eprintln!("Usage: {} <cmd> [args ...]", rawargs[0]);
+        exit(1);
+    }
+
+    let args = Args {
+        cmd: rawargs[1].clone(),
+        args: rawargs[2..].to_vec(),
+    };
+
     let (parent, child) = sandbox::socketpair().expect("socketpair");
 
     match fork::fork() {
@@ -94,7 +114,7 @@ fn main() {
     }
     Ok(Fork::Child) => {
         drop(parent);
-        handle_child(child).expect("child error");
+        handle_child(child, args).expect("child error");
         exit(0);
     }
     Err(e) => {

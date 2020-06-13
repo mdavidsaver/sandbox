@@ -1,6 +1,7 @@
 use std::{error, fmt};
 use std::io::Error;
 use std::net::TcpStream;
+use std::ffi::CString;
 
 use std::os::unix::io::FromRawFd;
 
@@ -12,6 +13,9 @@ mod ext;
 
 mod capability;
 pub use capability::*;
+
+mod proc;
+pub use proc::*;
 
 pub fn socketpair() -> Result<(TcpStream, TcpStream), AnnotatedError> {
     let mut fds = vec![0, 2];
@@ -64,10 +68,10 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
             Ok(TryWait::Done(_child, sts)) => return Ok(sts),
             }
         },
-        _sig => {
+        sig => {
             // we are being interrupted.
             // be delicate with child at first
-            let num = if cnt<3 { libc::SIGINT } else { libc::SIGKILL };
+            let num = if cnt<3 { sig } else { libc::SIGKILL };
             cnt+=1;
             kill(pid, num)?;
         },
@@ -89,21 +93,29 @@ pub fn mount(src: &str,
              target: &str,
              fstype: &str,
              flags: libc::c_ulong,
-             data: Option<&[u8]>
-             ) -> Result<(), Error>
+             data: Option<&str>
+             ) -> Result<(), AnnotatedError>
 {
+    let csrc = CString::new(src).expect("nil src");
+    let ctarget = CString::new(target).expect("nil target");
+    let cfstype = CString::new(fstype).expect("nil fstype");
+    let cdata = data.map(|s| {
+        CString::new(s).expect("nil data")
+    });
     unsafe {
-        let data = match data {
+        let data = match cdata {
         Some(d) => d.as_ptr() as *const libc::c_void,
         None => ::std::ptr::null(),
         };
-        if 0!=libc::mount(src.as_ptr() as *const i8,
-                          target.as_ptr() as *const i8,
-                          fstype.as_ptr() as *const i8,
+        if 0!=libc::mount(csrc.as_ptr() as *const i8,
+                          ctarget.as_ptr() as *const i8,
+                          cfstype.as_ptr() as *const i8,
                           flags,
                           data)
         {
-            return Err(Error::last_os_error());
+            return Err(Error::last_os_error()
+                .annotate(&format!("mount src={:?} target={:?} fs={:?} flags=0x{:x} data={:?}",
+                                  src, target, fstype, flags, data)));
         }
     }
     Ok(())
@@ -136,7 +148,9 @@ impl fmt::Display for AnnotatedError {
     }
 }
 
+/// Add a context message to an Error
 pub trait Annotatable: error::Error {
+    /// Turn any Error into an AnnotatedError
     fn annotate(self, msg:&str) -> AnnotatedError
         where Self: Sized + 'static
     {
@@ -147,6 +161,7 @@ pub trait Annotatable: error::Error {
     }
 }
 
+// allow any Error to be annotated
 impl<E: error::Error + ?Sized> Annotatable for E {}
 
 #[cfg(test)]

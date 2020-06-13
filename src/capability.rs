@@ -17,7 +17,7 @@ pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
         version: ext::_LINUX_CAPABILITY_VERSION_3,
         pid: pid,
     };
-    let mut data = vec![ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}; ext::_LINUX_CAPABILITY_U32S_3 as usize];
+    let mut data = vec![ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}; 4*ext::_LINUX_CAPABILITY_U32S_3 as usize];
 
     let err = unsafe {
         ext::capget(&mut head, data.as_mut_ptr())
@@ -26,8 +26,7 @@ pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
         return Err(Error::last_os_error());
     }
 
-    let bitsper = ::std::mem::size_of_val(&data[0].effective);
-    let nbits = bitsper * ext::_LINUX_CAPABILITY_U32S_3 as usize;
+    let nbits = 32 * ext::_LINUX_CAPABILITY_U32S_3 as usize;
 
     let mut ret = Cap {
         effective: vec![false; nbits],
@@ -36,8 +35,8 @@ pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
     };
 
     for n in 0..nbits {
-        let i = n/bitsper;
-        let m = 1<<(n%bitsper) as u32;
+        let i = n/32;
+        let m = 1<<(n%32) as u32;
         if (data[i].effective&m)!=0 {
             ret.effective[n] = true;
         }
