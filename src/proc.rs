@@ -13,16 +13,18 @@ pub struct Exec {
 
 impl Exec {
     pub fn new<T>(cmd: T) -> Result<Exec, ffi::NulError>
-        where T: Into<Vec<u8>>
+        where T: AsRef<str>
     {
         let mut es = HashMap::new();
+
+        // initially populate with process environment
         env::vars().try_for_each(|(k,v)| {
             es.insert(k.clone(), ffi::CString::new(format!("{}={}", &k,&v).as_bytes())?);
             Ok(())
         })?;
 
         Ok(Exec {
-            cmd: ffi::CString::new(cmd)?,
+            cmd: ffi::CString::new(cmd.as_ref())?,
             args: vec![],
             env: es,
         })
@@ -30,13 +32,31 @@ impl Exec {
 
     pub fn args<I>(&mut self, args: I) -> Result<&mut Self, ffi::NulError>
         where I: IntoIterator,
-              I::Item: Into<Vec<u8>>
+              I::Item: AsRef<str>
     {
         args.into_iter().try_for_each(|s| {
-            self.args.push(ffi::CString::new(s)?);
+            self.args.push(ffi::CString::new(s.as_ref())?);
             Ok(())
         })?;
         Ok(self)
+    }
+
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.env.clear();
+        self
+    }
+
+    pub fn env<'a, T>(&mut self, name: T, value: T) -> Result<&mut Self, ffi::NulError>
+        where T: Into<&'a str>
+    {
+        self.env.insert(name.into().to_string(),
+                        ffi::CString::new(value.into())?);
+        Ok(self)
+    }
+
+    pub fn env_remove<'a, T: Into<&'a str>>(&mut self, name: T) -> &mut Self {
+        self.env.remove(name.into());
+        self
     }
 
     pub fn exec(&self) -> Result<(), AnnotatedError> {
@@ -47,11 +67,11 @@ impl Exec {
         args.push(::std::ptr::null());
         env.push(::std::ptr::null());
 
-        unsafe {
+        Err(unsafe {
             libc::execvpe(cmd, args.as_ptr(), env.as_ptr());
             // only returns on error
-            Err(io::Error::last_os_error()
-            .annotate(""))
-        }
+            io::Error::last_os_error()
+        }.annotate(&format!("exec cmd={:?} args={:?} env={:?}",
+                            self.cmd, self.args, self.env)))
     }
 }

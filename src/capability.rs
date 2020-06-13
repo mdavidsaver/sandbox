@@ -11,13 +11,19 @@ pub struct Cap {
     pub inheritable: Vec<bool>,
 }
 
+const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as usize;
+
+fn empty_data() -> ext::__user_cap_data_struct {
+    ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}
+}
+
 /// Get Linux capabilities for specific process (or 0 for self)
 pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
     let mut head = ext::__user_cap_header_struct {
         version: ext::_LINUX_CAPABILITY_VERSION_3,
         pid: pid,
     };
-    let mut data = vec![ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}; 4*ext::_LINUX_CAPABILITY_U32S_3 as usize];
+    let mut data = vec![empty_data(); DATA_SIZE];
 
     let err = unsafe {
         ext::capget(&mut head, data.as_mut_ptr())
@@ -26,7 +32,7 @@ pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
         return Err(Error::last_os_error());
     }
 
-    let nbits = 32 * ext::_LINUX_CAPABILITY_U32S_3 as usize;
+    let nbits = 32 * DATA_SIZE;
 
     let mut ret = Cap {
         effective: vec![false; nbits],
@@ -57,7 +63,7 @@ pub fn capclear() -> Result<(), Error> {
         version: ext::_LINUX_CAPABILITY_VERSION_3,
         pid: 0,
     };
-    let mut data = vec![ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}; ext::_LINUX_CAPABILITY_U32S_3 as usize];
+    let mut data = vec![empty_data(); DATA_SIZE];
 
     let err = unsafe {
         ext::capset(&mut head, data.as_mut_ptr())

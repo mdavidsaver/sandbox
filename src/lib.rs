@@ -89,21 +89,22 @@ pub fn unshare(flags: libc::c_int) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn mount(src: &str,
-             target: &str,
-             fstype: &str,
+pub fn mount<S>(src: S,
+             target: S,
+             fstype: S,
              flags: libc::c_ulong,
-             data: Option<&str>
+             data: Option<S>
              ) -> Result<(), AnnotatedError>
+    where S: AsRef<str>
 {
-    let csrc = CString::new(src).expect("nil src");
-    let ctarget = CString::new(target).expect("nil target");
-    let cfstype = CString::new(fstype).expect("nil fstype");
+    let csrc = CString::new(src.as_ref()).expect("nil src");
+    let ctarget = CString::new(target.as_ref()).expect("nil target");
+    let cfstype = CString::new(fstype.as_ref()).expect("nil fstype");
     let cdata = data.map(|s| {
-        CString::new(s).expect("nil data")
+        CString::new(s.as_ref()).expect("nil data")
     });
     unsafe {
-        let data = match cdata {
+        let pdata = match cdata {
         Some(d) => d.as_ptr() as *const libc::c_void,
         None => ::std::ptr::null(),
         };
@@ -111,11 +112,11 @@ pub fn mount(src: &str,
                           ctarget.as_ptr() as *const i8,
                           cfstype.as_ptr() as *const i8,
                           flags,
-                          data)
+                          pdata)
         {
             return Err(Error::last_os_error()
-                .annotate(&format!("mount src={:?} target={:?} fs={:?} flags=0x{:x} data={:?}",
-                                  src, target, fstype, flags, data)));
+                .annotate(&format!("mount src={:?} target={:?} fs={:?} flags=0x{:x} data=",
+                                  src.as_ref(), target.as_ref(), fstype.as_ref(), flags)));
         }
     }
     Ok(())
@@ -163,6 +164,19 @@ pub trait Annotatable: error::Error {
 
 // allow any Error to be annotated
 impl<E: error::Error + ?Sized> Annotatable for E {}
+
+pub trait AnnotateResult {
+    type Value;
+    fn annotate<S: AsRef<str>>(self, msg: S) -> Result<Self::Value, AnnotatedError>;
+}
+
+// Allow Result to be annotated
+impl<V,E: Annotatable + 'static> AnnotateResult for Result<V,E> {
+    type Value = V;
+    fn annotate<S: AsRef<str>>(self, msg: S) -> Result<Self::Value, AnnotatedError> {
+        self.map_err(|e| { e.annotate(msg.as_ref()) })
+    }
+}
 
 #[cfg(test)]
 mod tests {

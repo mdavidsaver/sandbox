@@ -9,16 +9,16 @@ use libc;
 use fork::Fork;
 
 use sandbox;
-use sandbox::Annotatable;
-
-struct Args {
-    cmd: String,
-    args: Vec<String>,
-}
+use sandbox::AnnotateResult;
 
 fn write_file(name: &str, buf: &[u8]) -> io::Result<()> {
     let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))?;
     file.write_all(buf)
+}
+
+fn mkdirs<S: AsRef<str>>(name: S) -> Result<(), sandbox::AnnotatedError> {
+    fs::create_dir_all(Path::new(name.as_ref()))
+        .annotate(format!("mkdirs {}", name.as_ref()))
 }
 
 fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Box<dyn Error>> {
@@ -37,10 +37,10 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
     exit(sandbox::park(pid)?);
 }
 
-fn handle_child(mut toparent: net::TcpStream, args: Args) -> Result<(), Box<dyn Error>> {
+fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
 
     sandbox::unshare(libc::CLONE_NEWNS|libc::CLONE_NEWPID|libc::CLONE_NEWUSER|libc::CLONE_NEWCGROUP)
-    .map_err(|err| { err.annotate("unshare") })?;
+        .annotate("unshare")?;
     // This process is now in the new mount, user, and cgroup namespaces.
     // But remains in the original pid namespace.
     // The grandchild will be pid 1 in the new pid namespace.
@@ -57,7 +57,7 @@ fn handle_child(mut toparent: net::TcpStream, args: Args) -> Result<(), Box<dyn 
         exit(sandbox::park(pid)?);
     }
     Ok(Fork::Child) => {
-        handle_grandchild(args).expect("grandchild error");
+        handle_grandchild().expect("grandchild error");
         exit(0);
     }
     Err(e) => {
@@ -67,54 +67,58 @@ fn handle_child(mut toparent: net::TcpStream, args: Args) -> Result<(), Box<dyn 
     }
 }
 
-fn handle_grandchild(args: Args) -> Result<(), Box<dyn Error>>  {
+fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     // we are PID 1 with full capabilities
-
-    let cwd = env::current_dir()?;
 
     let noopt = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
 
     sandbox::mount(&"", &"/", &"", libc::MS_REC|libc::MS_SLAVE, None)?;
 
-    fs::create_dir_all(Path::new("/proc"))?;
+    mkdirs("/proc")?;
     sandbox::mount(&"none", &"/proc", &"proc", noopt, None)?;
 
-    //fs::create_dir_all(Path::new("/sys/fs/cgroup/unified"))?;
-    //sandbox::mount(&"none", &"/sys/fs/cgroup/unified", &"cgroup2", noopt, None)?;
+    mkdirs("/sys/fs/cgroup")?;
+    sandbox::mount(&"none", &"/sys/fs/cgroup", &"tmpfs", noopt, None)?;
 
-    fs::create_dir_all(Path::new("/tmp"))?;
+    mkdirs("/sys/fs/cgroup/unified")?;
+    sandbox::mount(&"none", &"/sys/fs/cgroup/unified", &"cgroup2", noopt, None)?;
+
+    mkdirs("/tmp")?;
     sandbox::mount(&"none", &"/tmp", &"tmpfs", noopt, None)?;
 
-    sandbox::Exec::new(args.cmd)?
-                    .args(args.args)?
-                    .exec()?;
+    mkdirs("/var/tmp")?;
+    sandbox::mount(&"none", &"/var/tmp", &"tmpfs", noopt, None)?;
 
-    Ok(()) // never reached
-}
+    // drop perm
 
-fn main() {
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len()<=1 {
         eprintln!("Usage: {} <cmd> [args ...]", rawargs[0]);
         exit(1);
     }
 
-    let args = Args {
-        cmd: rawargs[1].clone(),
-        args: rawargs[2..].to_vec(),
-    };
+    sandbox::Exec::new(&rawargs[1])?
+                    .args(&rawargs[1..].to_vec())?
+                    .exec()?;
 
-    let (parent, child) = sandbox::socketpair().expect("socketpair");
+    Ok(()) // never reached
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+
+    let _cwd = env::current_dir()?;
+
+    let (parent, child) = sandbox::socketpair()?;
 
     match fork::fork() {
     Ok(Fork::Parent(pid)) => {
         drop(child);
-        handle_parent(pid, parent).expect("parent error");
+        handle_parent(pid, parent)?;
         exit(0);
     }
     Ok(Fork::Child) => {
         drop(parent);
-        handle_child(child, args).expect("child error");
+        handle_child(child)?;
         exit(0);
     }
     Err(e) => {
