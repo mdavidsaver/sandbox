@@ -9,6 +9,7 @@ use libc;
 use fork::Fork;
 
 use sandbox;
+use sandbox::Annotatable;
 
 fn write_file(name: &str, buf: &[u8]) -> io::Result<()> {
     let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))?;
@@ -33,7 +34,8 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
 
 fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
 
-    sandbox::unshare(libc::CLONE_NEWNS|libc::CLONE_NEWPID|libc::CLONE_NEWUSER|libc::CLONE_NEWCGROUP)?;
+    sandbox::unshare(libc::CLONE_NEWNS|libc::CLONE_NEWPID|libc::CLONE_NEWUSER|libc::CLONE_NEWCGROUP)
+    .map_err(|err| { err.annotate("unshare") })?;
     // This process is now in the new mount, user, and cgroup namespaces.
     // But remains in the original pid namespace.
     // The grandchild will be pid 1 in the new pid namespace.
