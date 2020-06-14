@@ -12,7 +12,7 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    runc(&HideHome::new(&rawargs[1], &rawargs[1..]))?;
+    runc(&HideHome::new(&rawargs[1], &rawargs[1..])?)?;
 
     Ok(())
 }

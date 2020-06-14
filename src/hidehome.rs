@@ -5,16 +5,17 @@ use libc;
 use log::debug;
 
 use super::container::{ContainerHooks, Error, IdMap, Proc};
-use super::util;
+use super::{util, ext};
 use super::util::AnnotateResult;
 
 /// Container which executes a command with most of /home hidden
 pub struct HideHome {
+    isuser: bool,
     args: Vec<String>,
 }
 
 impl HideHome {
-    pub fn new<A, B, I>(cmd: A, args: I) -> HideHome
+    pub fn new<A, B, I>(cmd: A, args: I) -> Result<HideHome, Error>
     where
         A: AsRef<str>,
         B: AsRef<str>,
@@ -24,23 +25,33 @@ impl HideHome {
         for arg in args {
             cmd.push(arg.as_ref().to_string());
         }
-        HideHome { args: cmd }
+        Ok(HideHome {
+            isuser: !util::Cap::current()?.effective(ext::CAP_SYS_ADMIN),
+            args: cmd,
+        })
     }
 }
 
 impl ContainerHooks for HideHome {
     fn unshare(&self) -> Result<(), Error> {
         debug!("child unshare()");
-        util::unshare(
-            libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWUSER | libc::CLONE_NEWCGROUP,
-        )?;
+        let mut flags = libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWCGROUP;
+        if self.isuser {
+            flags |= libc::CLONE_NEWUSER;
+        }
+        util::unshare(flags)?;
         Ok(())
     }
 
     fn set_id_map(&self, pid: &Proc) -> Result<(), Error> {
         // Setup 1-1 mapping
-        IdMap::new_uid(pid.id()).add(0, 0, 0xffffffff).write()?;
-        IdMap::new_gid(pid.id()).add(0, 0, 0xffffffff).write()?;
+        if self.isuser {
+            debug!("Setup 1-1 UID mapping");
+            let uid = util::getuid();
+            let gid = util::getgid();
+            IdMap::new_uid(pid.id()).add(uid, uid, 1).write()?;
+            IdMap::new_gid(pid.id()).add(gid, gid, 1).write()?;
+        }
         Ok(())
     }
 
@@ -90,11 +101,14 @@ impl ContainerHooks for HideHome {
 
         let noopt = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
 
+        // begin by slaving the new mount ns
         util::mount("", "/", "", libc::MS_REC | libc::MS_SLAVE)?;
 
+        // mount for the new PID ns
         util::mkdirs("/proc")?;
         util::mount("none", "/proc", "proc", noopt)?;
 
+        // mount for the new cgroup ns
         util::mkdirs("/sys/fs/cgroup")?;
         util::mount("none", "/sys/fs/cgroup", "tmpfs", noopt)?;
 

@@ -104,6 +104,14 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
     toparent.read_exact(&mut msg)?;
     drop(toparent);
     debug!("child continue");
+    debug!(
+        "Child Perms uid {},{} gid {},{}",
+        util::getuid(),
+        util::geteuid(),
+        util::getgid(),
+        util::getegid()
+    );
+    debug!("Cap {}", util::Cap::current()?);
 
     match fork()? {
         Fork::Parent(mut pid) => {
@@ -128,6 +136,15 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
 fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<(), Error> {
     debug!("Grandchild");
 
+    debug!(
+        "Initial Perms uid {},{} gid {},{}",
+        util::getuid(),
+        util::geteuid(),
+        util::getgid(),
+        util::getegid()
+    );
+    debug!("Cap {}", util::Cap::current()?);
+
     // clear SUID-ness
     util::setegid(util::getgid())?;
     util::seteuid(util::getuid())?;
@@ -136,7 +153,7 @@ fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<(), Error> {
     util::Cap::current()?.activate().update()?;
 
     debug!(
-        "Perms uid {},{} gid {},{}",
+        "Update Perms uid {},{} gid {},{}",
         util::getuid(),
         util::geteuid(),
         util::getgid(),
@@ -149,6 +166,13 @@ fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<(), Error> {
     // drop all capabilities, effective, permitted, and inheritable
     util::Cap::current()?.clear().update()?;
     debug!("Drop caps");
+    debug!(
+        "Final Perms uid {},{} gid {},{}",
+        util::getuid(),
+        util::geteuid(),
+        util::getgid(),
+        util::getegid()
+    );
     debug!("Cap {}", util::Cap::current()?);
 
     hooks.setup()?;
