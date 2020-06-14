@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::process::exit;
 use std::{net, fs, env};
-use std::io::{self, Write, Read};
+use std::io::{Write, Read};
 use std::path::Path;
 
 use libc;
@@ -11,9 +11,11 @@ use fork::Fork;
 use sandbox;
 use sandbox::AnnotateResult;
 
-fn write_file(name: &str, buf: &[u8]) -> io::Result<()> {
-    let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))?;
+fn write_file(name: &str, buf: &[u8]) -> Result<(), sandbox::AnnotatedError> {
+    let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))
+        .annotate(format!("write_file {} open",name))?;
     file.write_all(buf)
+        .annotate(format!("write_file {} I/O",name))
 }
 
 fn mkdirs<S: AsRef<str>>(name: S) -> Result<(), sandbox::AnnotatedError> {
