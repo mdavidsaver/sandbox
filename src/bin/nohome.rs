@@ -11,16 +11,16 @@ use fork::Fork;
 use sandbox;
 use sandbox::AnnotateResult;
 
-fn write_file(name: &str, buf: &[u8]) -> Result<(), sandbox::AnnotatedError> {
-    let mut file = fs::OpenOptions::new().write(true).open(Path::new(name))
-        .annotate(format!("write_file {} open",name))?;
+fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<(), sandbox::AnnotatedError> {
+    let mut file = fs::OpenOptions::new().write(true).open(name.as_ref())
+        .annotate(format!("write_file {} open",name.as_ref().display()))?;
     file.write_all(buf)
-        .annotate(format!("write_file {} I/O",name))
+        .annotate(format!("write_file {} I/O",name.as_ref().display()))
 }
 
-fn mkdirs<S: AsRef<str>>(name: S) -> Result<(), sandbox::AnnotatedError> {
-    fs::create_dir_all(Path::new(name.as_ref()))
-        .annotate(format!("mkdirs {}", name.as_ref()))
+fn mkdirs<S: AsRef<Path>>(name: S) -> Result<(), sandbox::AnnotatedError> {
+    fs::create_dir_all(name.as_ref())
+        .annotate(format!("mkdirs {}", name.as_ref().display()))
 }
 
 fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Box<dyn Error>> {
@@ -29,8 +29,8 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
     let mut msg = vec![0; 1];
     tochild.read_exact(&mut msg)?;
 
-    write_file(&format!("/proc/{}/uid_map", pid), "0          0 4294967295\n".as_bytes())?;
-    write_file(&format!("/proc/{}/gid_map", pid), "0          0 4294967295\n".as_bytes())?;
+    write_file(format!("/proc/{}/uid_map", pid), "0          0 4294967295\n".as_bytes())?;
+    write_file(format!("/proc/{}/gid_map", pid), "0          0 4294967295\n".as_bytes())?;
 
     // notify client to proceed
     tochild.write_all(".".as_bytes())?;
@@ -72,26 +72,61 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
 fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     // we are PID 1 with full capabilities
 
+    let tmp = Path::new("/tmp");
+
+    // Taking notion of /home from caller's environment.
+    // Not validated.  Should be ok as we will only hide,
+    // and never grant more visibility or permission.
+    let home = Path::new(&env::var("HOME")?).canonicalize()?;
+    if !home.is_absolute() {
+        eprintln!("$HOME must be an absolute path");
+        exit(1);
+    }
+
+    let cwd = env::current_dir()?.canonicalize()?;
+    let relwd = cwd.strip_prefix(&home)
+        .annotate(format!("Run under {}, not {}", home.display(), cwd.display()))?;
+
+    // temp location of cwd under /tmp
+    let twd = tmp.join(relwd);
+
     let noopt = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
 
-    sandbox::mount(&"", &"/", &"", libc::MS_REC|libc::MS_SLAVE, None)?;
+    sandbox::mount("", "/", "", libc::MS_REC|libc::MS_SLAVE)?;
 
     mkdirs("/proc")?;
-    sandbox::mount(&"none", &"/proc", &"proc", noopt, None)?;
+    sandbox::mount("none", "/proc", "proc", noopt)?;
 
     mkdirs("/sys/fs/cgroup")?;
-    sandbox::mount(&"none", &"/sys/fs/cgroup", &"tmpfs", noopt, None)?;
+    sandbox::mount("none", "/sys/fs/cgroup", "tmpfs", noopt)?;
 
     mkdirs("/sys/fs/cgroup/unified")?;
-    sandbox::mount(&"none", &"/sys/fs/cgroup/unified", &"cgroup2", noopt, None)?;
+    sandbox::mount("none", "/sys/fs/cgroup/unified", "cgroup2", noopt)?;
 
-    mkdirs("/tmp")?;
-    sandbox::mount(&"none", &"/tmp", &"tmpfs", noopt, None)?;
+    // begin preparing replacement /home
+    // will move /tmp -> /home after binding
+    sandbox::mount("none", &tmp, "tmpfs", noopt)?;
 
+    // bind $CWD under new $HOME
+    mkdirs(&twd)?;
+    sandbox::mount(&cwd, &twd, "", libc::MS_BIND)?;
+
+    // hide real /home
+    sandbox::mount(&tmp, &home, "", libc::MS_MOVE)?;
+
+    // hide real temporary files to prevent snooping
+    sandbox::mount("none", "/tmp", "tmpfs", noopt)?;
     mkdirs("/var/tmp")?;
-    sandbox::mount(&"none", &"/var/tmp", &"tmpfs", noopt, None)?;
+    sandbox::mount("none", "/var/tmp", "tmpfs", noopt)?;
+
+    // switch to new FS tree.  (avoid ../ escape)
+    env::set_current_dir(cwd)?;
 
     // drop perm
+    sandbox::setegid(sandbox::getgid())?;
+    sandbox::seteuid(sandbox::getuid())?;
+    sandbox::capclear()?;
+    eprintln!("Cap {:?}", sandbox::capget(0)?);
 
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len()<=1 {
@@ -107,8 +142,6 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-
-    let _cwd = env::current_dir()?;
 
     let (parent, child) = sandbox::socketpair()?;
 

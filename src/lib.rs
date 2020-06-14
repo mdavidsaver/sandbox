@@ -2,6 +2,7 @@ use std::{error, fmt};
 use std::io::Error;
 use std::net::TcpStream;
 use std::ffi::CString;
+use std::path::Path;
 
 use std::os::unix::io::FromRawFd;
 
@@ -16,6 +17,9 @@ pub use capability::*;
 
 mod proc;
 pub use proc::*;
+
+mod user;
+pub use user::*;
 
 pub fn socketpair() -> Result<(TcpStream, TcpStream), AnnotatedError> {
     let mut fds = vec![0, 2];
@@ -35,6 +39,7 @@ pub enum TryWait {
     Done(libc::pid_t, i32),
 }
 
+/// Wraps waitpid()
 pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait, Error> {
    let mut sts = 0;
     unsafe {
@@ -89,34 +94,43 @@ pub fn unshare(flags: libc::c_int) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn mount<S>(src: S,
-             target: S,
-             fstype: S,
-             flags: libc::c_ulong,
-             data: Option<S>
-             ) -> Result<(), AnnotatedError>
-    where S: AsRef<str>
+pub fn mount<A,B,C>(src: A,
+             target: B,
+             fstype: C,
+             flags: libc::c_ulong
+             ) -> Result<(), Box<dyn error::Error + 'static>>
+    where A: AsRef<Path>,
+          B: AsRef<Path>,
+          C: AsRef<Path>
 {
-    let csrc = CString::new(src.as_ref()).expect("nil src");
-    let ctarget = CString::new(target.as_ref()).expect("nil target");
-    let cfstype = CString::new(fstype.as_ref()).expect("nil fstype");
-    let cdata = data.map(|s| {
-        CString::new(s.as_ref()).expect("nil data")
-    });
+    mount_with_data(src, target, fstype, flags, "")
+}
+
+pub fn mount_with_data<A,B,C, D>(src: A,
+             target: B,
+             fstype: C,
+             flags: libc::c_ulong,
+             data: D
+             ) -> Result<(), Box<dyn error::Error + 'static>>
+    where A: AsRef<Path>,
+          B: AsRef<Path>,
+          C: AsRef<Path>,
+          D: AsRef<Path>,
+{
+    let csrc = CString::new(src.as_ref().to_string_lossy().as_ref())?;
+    let ctarget = CString::new(target.as_ref().to_string_lossy().as_ref())?;
+    let cfstype = CString::new(fstype.as_ref().to_string_lossy().as_ref())?;
+    let cdata = CString::new(data.as_ref().to_string_lossy().as_ref())?;
     unsafe {
-        let pdata = match cdata {
-        Some(d) => d.as_ptr() as *const libc::c_void,
-        None => ::std::ptr::null(),
-        };
         if 0!=libc::mount(csrc.as_ptr() as *const i8,
                           ctarget.as_ptr() as *const i8,
                           cfstype.as_ptr() as *const i8,
                           flags,
-                          pdata)
+                          cdata.as_ptr() as *const libc::c_void)
         {
-            return Err(Error::last_os_error()
+            Err(Error::last_os_error()
                 .annotate(&format!("mount src={:?} target={:?} fs={:?} flags=0x{:x} data=",
-                                  src.as_ref(), target.as_ref(), fstype.as_ref(), flags)));
+                                  src.as_ref(), target.as_ref(), fstype.as_ref(), flags)))?;
         }
     }
     Ok(())
@@ -137,6 +151,15 @@ pub struct AnnotatedError {
     err: Option<Box<dyn error::Error + 'static>>,
 }
 
+impl AnnotatedError {
+    pub fn new<S: AsRef<str>>(msg: S) -> AnnotatedError {
+        AnnotatedError {
+            msg: msg.as_ref().to_string(),
+            err: None,
+        }
+    }
+}
+
 impl error::Error for AnnotatedError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         self.err.as_ref().map(|e| e.as_ref())
@@ -152,11 +175,11 @@ impl fmt::Display for AnnotatedError {
 /// Add a context message to an Error
 pub trait Annotatable: error::Error {
     /// Turn any Error into an AnnotatedError
-    fn annotate(self, msg:&str) -> AnnotatedError
+    fn annotate<S: AsRef<str>>(self, msg: S) -> AnnotatedError
         where Self: Sized + 'static
     {
         AnnotatedError {
-            msg: msg.to_string(),
+            msg: msg.as_ref().to_string(),
             err: Some(Box::new(self)),
         }
     }
