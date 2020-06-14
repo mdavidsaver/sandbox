@@ -1,4 +1,4 @@
-
+use std::fmt;
 use std::io::Error;
 
 use libc;
@@ -6,9 +6,9 @@ use super::ext;
 
 #[derive(Debug, Clone)]
 pub struct Cap {
-    pub effective: Vec<bool>,
-    pub permitted: Vec<bool>,
-    pub inheritable: Vec<bool>,
+    pub effective: Vec<u32>,
+    pub permitted: Vec<u32>,
+    pub inheritable: Vec<u32>,
 }
 
 const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as usize;
@@ -17,67 +17,125 @@ fn empty_data() -> ext::__user_cap_data_struct {
     ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}
 }
 
-/// Get Linux capabilities for specific process (or 0 for self)
-pub fn capget(pid: libc::pid_t) -> Result<Cap, Error> {
-    let mut head = ext::__user_cap_header_struct {
-        version: ext::_LINUX_CAPABILITY_VERSION_3,
-        pid: pid,
-    };
-    let mut data = vec![empty_data(); DATA_SIZE];
-
-    let err = unsafe {
-        ext::capget(&mut head, data.as_mut_ptr())
-    };
-    if err!=0 {
-        return Err(Error::last_os_error());
+impl Cap {
+    pub fn current() -> Result<Cap, Error> {
+        Cap::current_pid(0)
     }
 
-    let nbits = 32 * DATA_SIZE;
+    pub fn current_pid(pid: libc::pid_t) -> Result<Cap, Error> {
+        let mut head = ext::__user_cap_header_struct {
+            version: ext::_LINUX_CAPABILITY_VERSION_3,
+            pid: pid,
+        };
+        let mut data = vec![empty_data(); DATA_SIZE];
 
-    let mut ret = Cap {
-        effective: vec![false; nbits],
-        permitted: vec![false; nbits],
-        inheritable: vec![false; nbits],
-    };
+        let err = unsafe {
+            ext::capget(&mut head, data.as_mut_ptr())
+        };
+        if err!=0 {
+            return Err(Error::last_os_error());
+        }
 
-    for n in 0..nbits {
-        let i = n/32;
-        let m = 1<<(n%32) as u32;
-        if (data[i].effective&m)!=0 {
-            ret.effective[n] = true;
+        let mut ret = Cap {
+            effective: vec![0; DATA_SIZE],
+            permitted: vec![0; DATA_SIZE],
+            inheritable: vec![0; DATA_SIZE],
+        };
+
+        for n in 0..DATA_SIZE {
+            ret.effective[n]   = data[n].effective;
+            ret.permitted[n]   = data[n].permitted;
+            ret.inheritable[n] = data[n].inheritable;
         }
-        if (data[i].permitted&m)!=0 {
-            ret.permitted[n] = true;
-        }
-        if (data[i].inheritable&m)!=0 {
-            ret.inheritable[n] = true;
-        }
+
+        Ok(ret)
     }
 
-    Ok(ret)
+    pub fn update(&self) -> Result<(), Error> {
+        self.update_pid(0)
+    }
+
+    pub fn update_pid(&self, pid: libc::pid_t) -> Result<(), Error> {
+        let mut data = vec![empty_data(); DATA_SIZE];
+
+        for n in 0..DATA_SIZE {
+            data[n].effective   = self.effective[n];
+            data[n].permitted   = self.permitted[n];
+            data[n].inheritable = self.inheritable[n];
+        }
+
+        let mut head = ext::__user_cap_header_struct {
+            version: ext::_LINUX_CAPABILITY_VERSION_3,
+            pid: pid,
+        };
+
+        let err = unsafe {
+            ext::capset(&mut head, data.as_mut_ptr())
+        };
+        if err!=0 {
+            return Err(Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn activate(&mut self) -> &mut Self {
+        for i in 0..self.effective.len() {
+            self.effective[i] = self.permitted[i];
+        }
+        self
+    }
+
+    pub fn clear_effective(&mut self) -> &mut Self {
+        for i in 0..self.effective.len() {
+            self.effective[i] = 0;
+        }
+        self
+    }
+
+    pub fn clear_permitted(&mut self) -> &mut Self {
+        for i in 0..self.permitted.len() {
+            self.permitted[i] = 0;
+        }
+        self
+    }
+
+    pub fn clear_inheritable(&mut self) -> &mut Self {
+        for i in 0..self.inheritable.len() {
+            self.inheritable[i] = 0;
+        }
+        self
+    }
+
+    pub fn clear(&mut self) -> &mut Self {
+        self.clear_effective().clear_permitted().clear_inheritable()
+    }
 }
 
-/// Clear Linux capabilities for this process
-pub fn capclear() -> Result<(), Error> {
-    let mut head = ext::__user_cap_header_struct {
-        version: ext::_LINUX_CAPABILITY_VERSION_3,
-        pid: 0,
-    };
-    let mut data = vec![empty_data(); DATA_SIZE];
-
-    let err = unsafe {
-        ext::capset(&mut head, data.as_mut_ptr())
-    };
-    if err!=0 {
-        return Err(Error::last_os_error());
+fn fmt_arr(arr: &[u32], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for n in (0..arr.len()).rev() {
+        write!(f, "{:08x}", arr[n])?;
     }
-
-    let err = unsafe {
-        libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0)
-    };
-    if err!=0 {
-        return Err(Error::last_os_error());
-    }
-
     Ok(())
+}
+
+impl fmt::Display for Cap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EFF: 0x")?;
+        fmt_arr(&self.effective, f)?;
+        write!(f, " PRM: 0x")?;
+        fmt_arr(&self.permitted, f)?;
+        write!(f, " INH: 0x")?;
+        fmt_arr(&self.inheritable, f)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_current() {
+        Cap::current().unwrap();
+    }
 }

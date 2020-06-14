@@ -85,12 +85,14 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     // we are PID 1 with full capabilities
     debug!("FS setup");
 
-    // clear SUID-ness, but retain capabilities
+    // clear SUID-ness
     sandbox::setegid(sandbox::getgid())?;
     sandbox::seteuid(sandbox::getuid())?;
     // effective capabilities have been cleared.  permitted remain unset
+    // re-activate all capabilities
+    sandbox::Cap::current()?.activate().update()?;
     debug!("Perms uid {},{} gid {},{}", sandbox::getuid(), sandbox::geteuid(), sandbox::getgid(), sandbox::getegid());
-    debug!("Cap {:?}", sandbox::capget(0)?);
+    debug!("Cap {}", sandbox::Cap::current()?);
 
     let tmp = Path::new("/tmp");
 
@@ -172,11 +174,10 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     // switch to new FS tree.  (avoid ../ escape)
     env::set_current_dir(cwd)?;
 
-    // drop perm
-    sandbox::capclear()?;
-    debug!("Drop perm");
-    debug!("Perms uid {},{} gid {},{}", sandbox::getuid(), sandbox::geteuid(), sandbox::getgid(), sandbox::getegid());
-    debug!("Cap {:?}", sandbox::capget(0)?);
+    // drop all capabilities, effective, permitted, and inheritable
+    sandbox::Cap::current()?.clear().update()?;
+    debug!("Drop caps");
+    debug!("Cap {}", sandbox::Cap::current()?);
 
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len()<=1 {
