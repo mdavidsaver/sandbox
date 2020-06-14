@@ -1,9 +1,84 @@
 use std::collections::HashMap;
+use std::io::Error;
 use std::{env, ffi, io};
 
 use libc;
+use signal_hook;
+use signal_hook::iterator::Signals;
+
+use log::debug;
 
 use super::{Annotatable, AnnotatedError};
+
+pub fn kill(pid: libc::pid_t, sig: libc::c_int) -> Result<(), Error> {
+    debug!("kill({},{})", pid, sig);
+    unsafe {
+        if 0 != libc::kill(pid, sig) {
+            return Err(Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+pub enum TryWait {
+    Busy,
+    Done(libc::pid_t, i32),
+}
+
+/// Wraps waitpid()
+pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait, Error> {
+    let mut sts = 0;
+    unsafe {
+        let ret = libc::waitpid(pid, &mut sts, libc::WNOHANG);
+        if ret == -1 {
+            Err(Error::last_os_error())
+        } else if ret == 0 {
+            Ok(TryWait::Busy)
+        } else {
+            Ok(TryWait::Done(ret, libc::WEXITSTATUS(sts)))
+        }
+    }
+}
+
+/// Wait for child PID to exit.  Kill child if we are signaled
+pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
+    let signals = Signals::new(&[
+        signal_hook::SIGTERM,
+        signal_hook::SIGINT,
+        signal_hook::SIGQUIT,
+        signal_hook::SIGCHLD,
+    ])?;
+    let mut isig = signals.forever();
+
+    let mut cnt = 0;
+
+    loop {
+        match trywaitpid(pid) {
+            Err(err) => return Err(err),
+            Ok(TryWait::Busy) => (),
+            Ok(TryWait::Done(_child, sts)) => return Ok(sts),
+        }
+        debug!("Waiting for PID {}", pid);
+
+        match isig.next() {
+            Some(signal_hook::SIGCHLD) => {
+                debug!("SIGCHLD");
+                // loop around to test child
+            }
+            Some(sig) => {
+                debug!("SIG {}", sig);
+                // we are being interrupted.
+                // be delicate with child at first
+                let num = if cnt < 2 { sig } else { libc::SIGKILL };
+                cnt += 1;
+                kill(pid, num)?;
+            }
+            None => {
+                unreachable!();
+            }
+        }
+    }
+}
 
 pub struct Exec {
     cmd: ffi::CString,
