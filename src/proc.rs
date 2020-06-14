@@ -1,5 +1,5 @@
-use std::{io, env, ffi};
 use std::collections::HashMap;
+use std::{env, ffi, io};
 
 use libc;
 
@@ -13,13 +13,17 @@ pub struct Exec {
 
 impl Exec {
     pub fn new<T>(cmd: T) -> Result<Exec, ffi::NulError>
-        where T: AsRef<str>
+    where
+        T: AsRef<str>,
     {
         let mut es = HashMap::new();
 
         // initially populate with process environment
-        env::vars().try_for_each(|(k,v)| {
-            es.insert(k.clone(), ffi::CString::new(format!("{}={}", &k,&v).as_bytes())?);
+        env::vars().try_for_each(|(k, v)| {
+            es.insert(
+                k.clone(),
+                ffi::CString::new(format!("{}={}", &k, &v).as_bytes())?,
+            );
             Ok(())
         })?;
 
@@ -31,8 +35,9 @@ impl Exec {
     }
 
     pub fn args<I>(&mut self, args: I) -> Result<&mut Self, ffi::NulError>
-        where I: IntoIterator,
-              I::Item: AsRef<str>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
     {
         args.into_iter().try_for_each(|s| {
             self.args.push(ffi::CString::new(s.as_ref())?);
@@ -47,10 +52,11 @@ impl Exec {
     }
 
     pub fn env<'a, T>(&mut self, name: T, value: T) -> Result<&mut Self, ffi::NulError>
-        where T: Into<&'a str>
+    where
+        T: Into<&'a str>,
     {
-        self.env.insert(name.into().to_string(),
-                        ffi::CString::new(value.into())?);
+        self.env
+            .insert(name.into().to_string(), ffi::CString::new(value.into())?);
         Ok(self)
     }
 
@@ -61,8 +67,8 @@ impl Exec {
 
     pub fn exec(&self) -> Result<(), AnnotatedError> {
         let cmd = self.cmd.as_ptr();
-        let mut args: Vec<*const libc::c_char> = self.args.iter().map(|s| { s.as_ptr() }).collect();
-        let mut env: Vec<*const libc::c_char> = self.env.iter().map(|(_k,v)| { v.as_ptr() }).collect();
+        let mut args: Vec<*const libc::c_char> = self.args.iter().map(|s| s.as_ptr()).collect();
+        let mut env: Vec<*const libc::c_char> = self.env.iter().map(|(_k, v)| v.as_ptr()).collect();
         // arrays must be null terminated
         args.push(::std::ptr::null());
         env.push(::std::ptr::null());
@@ -71,7 +77,10 @@ impl Exec {
             libc::execvpe(cmd, args.as_ptr(), env.as_ptr());
             // only returns on error
             io::Error::last_os_error()
-        }.annotate(&format!("exec cmd={:?} args={:?} env={:?}",
-                            self.cmd, self.args, self.env)))
+        }
+        .annotate(&format!(
+            "exec cmd={:?} args={:?} env={:?}",
+            self.cmd, self.args, self.env
+        )))
     }
 }

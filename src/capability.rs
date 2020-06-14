@@ -1,8 +1,8 @@
 use std::fmt;
 use std::io::Error;
 
-use libc;
 use super::ext;
+use libc;
 
 #[derive(Debug, Clone)]
 pub struct Cap {
@@ -14,7 +14,11 @@ pub struct Cap {
 const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as usize;
 
 fn empty_data() -> ext::__user_cap_data_struct {
-    ext::__user_cap_data_struct{effective:0,inheritable:0,permitted:0}
+    ext::__user_cap_data_struct {
+        effective: 0,
+        inheritable: 0,
+        permitted: 0,
+    }
 }
 
 impl Cap {
@@ -29,10 +33,8 @@ impl Cap {
         };
         let mut data = vec![empty_data(); DATA_SIZE];
 
-        let err = unsafe {
-            ext::capget(&mut head, data.as_mut_ptr())
-        };
-        if err!=0 {
+        let err = unsafe { ext::capget(&mut head, data.as_mut_ptr()) };
+        if err != 0 {
             return Err(Error::last_os_error());
         }
 
@@ -43,8 +45,8 @@ impl Cap {
         };
 
         for n in 0..DATA_SIZE {
-            ret.effective[n]   = data[n].effective;
-            ret.permitted[n]   = data[n].permitted;
+            ret.effective[n] = data[n].effective;
+            ret.permitted[n] = data[n].permitted;
             ret.inheritable[n] = data[n].inheritable;
         }
 
@@ -59,8 +61,8 @@ impl Cap {
         let mut data = vec![empty_data(); DATA_SIZE];
 
         for n in 0..DATA_SIZE {
-            data[n].effective   = self.effective[n];
-            data[n].permitted   = self.permitted[n];
+            data[n].effective = self.effective[n];
+            data[n].permitted = self.permitted[n];
             data[n].inheritable = self.inheritable[n];
         }
 
@@ -69,10 +71,8 @@ impl Cap {
             pid: pid,
         };
 
-        let err = unsafe {
-            ext::capset(&mut head, data.as_mut_ptr())
-        };
-        if err!=0 {
+        let err = unsafe { ext::capset(&mut head, data.as_mut_ptr()) };
+        if err != 0 {
             return Err(Error::last_os_error());
         }
         Ok(())
@@ -112,9 +112,9 @@ impl Cap {
     }
 
     pub fn effective(&self, cap: u32) -> bool {
-        let word = cap/32;
-        let bit = cap%32;
-        0!=(self.effective[word as usize]&bit)
+        let word = cap / 32;
+        let bit = cap % 32;
+        0 != (self.effective[word as usize] & bit)
     }
 }
 
