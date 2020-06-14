@@ -14,7 +14,7 @@ pub use super::capability::*;
 pub use super::container::*;
 pub use super::proc::*;
 pub use super::user::*;
-    
+
 pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<(), AnnotatedError> {
     debug!("write_file({}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()

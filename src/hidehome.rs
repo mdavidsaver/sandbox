@@ -1,5 +1,5 @@
-use std::{env, process};
 use std::path::Path;
+use std::{env, process};
 
 use libc;
 use log::debug;
@@ -8,24 +8,23 @@ use super::container::{ContainerHooks, Error, IdMap, Proc};
 use super::util;
 use super::util::AnnotateResult;
 
+/// Container which executes a command with most of /home hidden
 pub struct HideHome {
     args: Vec<String>,
 }
 
 impl HideHome {
-    pub fn new<A, B, I> (cmd: A, args: I) -> HideHome
-        where
-            A: AsRef<str>,
-            B: AsRef<str>,
-            I: IntoIterator<Item=B>,
+    pub fn new<A, B, I>(cmd: A, args: I) -> HideHome
+    where
+        A: AsRef<str>,
+        B: AsRef<str>,
+        I: IntoIterator<Item = B>,
     {
         let mut cmd = vec![cmd.as_ref().to_string()];
         for arg in args {
             cmd.push(arg.as_ref().to_string());
         }
-        HideHome {
-            args: cmd,
-        }
+        HideHome { args: cmd }
     }
 }
 
@@ -40,12 +39,8 @@ impl ContainerHooks for HideHome {
 
     fn set_id_map(&self, pid: &Proc) -> Result<(), Error> {
         // Setup 1-1 mapping
-        IdMap::new_uid(pid.id())
-        .add(0, 0, 0xffffffff)
-        .write()?;
-        IdMap::new_gid(pid.id())
-        .add(0, 0, 0xffffffff)
-        .write()?;
+        IdMap::new_uid(pid.id()).add(0, 0, 0xffffffff).write()?;
+        IdMap::new_gid(pid.id()).add(0, 0, 0xffffffff).write()?;
         Ok(())
     }
 
@@ -129,7 +124,6 @@ impl ContainerHooks for HideHome {
     }
 
     fn setup(&self) -> Result<(), Error> {
-    
         debug!("EXEC {:?}", &self.args[1..]);
 
         util::Exec::new(&self.args[1])?

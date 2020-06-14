@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::error;
 use std::io::{self, Read, Write};
 use std::net;
-use std::process::{Command, exit};
+use std::process::{exit, Command};
 
 use log::debug;
 
@@ -212,90 +212,97 @@ impl IdMap {
     }
 
     fn map_args<'a>(&'a self) -> Vec<String> {
-        self.map.iter()
-        .map(|(start, (end, count))| { vec![start, end, count] })
-        .flatten()
-        .map(|e| { format!("{}", e) })
-        .collect()
+        self.map
+            .iter()
+            .map(|(start, (end, count))| vec![start, end, count])
+            .flatten()
+            .map(|e| format!("{}", e))
+            .collect()
     }
 
     fn map_file(&self) -> String {
         // emit mapping as lines
         //   start# end# count#\n
-        self.map.iter()
-        .map(|(start, (end, count))| {
-            format!("{} {} {}\n", start, end, count)
-        }).fold(String::new(), |mut a, b| {
-            a += &b;
-            a
-        })
+        self.map
+            .iter()
+            .map(|(start, (end, count))| format!("{} {} {}\n", start, end, count))
+            .fold(String::new(), |mut a, b| {
+                a += &b;
+                a
+            })
     }
-    
+
     pub fn write(&self) -> Result<(), Error> {
         let caps = util::Cap::current()?;
 
         if self.isuid && caps.effective(ext::CAP_SETUID) {
             // directly write uid_map
-            util::write_file(format!("/proc/{}/uid_map", self.pid), self.map_file().as_bytes())?;
-
+            util::write_file(
+                format!("/proc/{}/uid_map", self.pid),
+                self.map_file().as_bytes(),
+            )?;
         } else if !self.isuid && caps.effective(ext::CAP_SETGID) {
             // directly write gid_map
-            util::write_file(format!("/proc/{}/gid_map", self.pid), self.map_file().as_bytes())?;
-
+            util::write_file(
+                format!("/proc/{}/gid_map", self.pid),
+                self.map_file().as_bytes(),
+            )?;
         } else {
             // call newuidmap or newgidmap
-            let cmd = if self.isuid {"newuidmap"} else {"newgidmap"};
+            let cmd = if self.isuid { "newuidmap" } else { "newgidmap" };
             let args = self.map_args();
             debug!("run: {} {} {:?}", cmd, self.pid, &args);
 
             Command::new(cmd)
-            .arg(format!("{}", self.pid))
-            .args(args)
-            .status()?
-            .code()
-            .ok_or(util::AnnotatedError::new("newuidmap errors"))?;
+                .arg(format!("{}", self.pid))
+                .args(args)
+                .status()?
+                .code()
+                .ok_or(util::AnnotatedError::new("newuidmap errors"))?;
         }
 
         Ok(())
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::TcpStream;
     use std::cell::RefCell;
+    use std::net::TcpStream;
 
     struct TestHooks(RefCell<TcpStream>);
 
     impl TestHooks {
         fn at(&self, pos: &str) {
-            self.0.borrow_mut().write_all(pos.as_bytes()).expect("log socket write");
+            self.0
+                .borrow_mut()
+                .write_all(pos.as_bytes())
+                .expect("log socket write");
         }
     }
 
     impl ContainerHooks for TestHooks {
-    fn at_start(&self) -> Result<(), Error> {
-        self.at("A");
-        Ok(())
-    }
-    fn unshare(&self) -> Result<(), Error> {
-        self.at("B");
-        Ok(())
-    }
-    fn set_id_map(&self, _pid: &Proc) -> Result<(), Error> {
-        self.at("C");
-        Ok(())
-    }
-    fn setup_priv(&self) -> Result<(), Error> {
-        self.at("D");
-        Ok(())
-    }
-    fn setup(&self) -> Result<(), Error> {
-        self.at("E");
-        Ok(())
-    }
+        fn at_start(&self) -> Result<(), Error> {
+            self.at("A");
+            Ok(())
+        }
+        fn unshare(&self) -> Result<(), Error> {
+            self.at("B");
+            Ok(())
+        }
+        fn set_id_map(&self, _pid: &Proc) -> Result<(), Error> {
+            self.at("C");
+            Ok(())
+        }
+        fn setup_priv(&self) -> Result<(), Error> {
+            self.at("D");
+            Ok(())
+        }
+        fn setup(&self) -> Result<(), Error> {
+            self.at("E");
+            Ok(())
+        }
     }
 
     #[test]
@@ -312,20 +319,14 @@ mod tests {
 
     #[test]
     fn map_args() {
-        let actual = IdMap::new_uid(0)
-            .add(0, 1, 2)
-            .add(15, 16, 2)
-            .map_args();
+        let actual = IdMap::new_uid(0).add(0, 1, 2).add(15, 16, 2).map_args();
 
         assert_eq!(actual, &["0", "1", "2", "15", "16", "2"]);
     }
 
     #[test]
     fn map_file() {
-        let actual = IdMap::new_uid(0)
-            .add(0, 1, 2)
-            .add(15, 16, 2)
-            .map_file();
+        let actual = IdMap::new_uid(0).add(0, 1, 2).add(15, 16, 2).map_file();
 
         assert_eq!(actual, "0 1 2\n15 16 2\n");
     }

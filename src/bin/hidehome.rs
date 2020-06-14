@@ -1,7 +1,7 @@
 use std::{env, process};
 
-use sandbox::{runc, Error};
 use sandbox::hidehome::HideHome;
+use sandbox::{runc, Error};
 
 fn main() -> Result<(), Error> {
     env_logger::init();

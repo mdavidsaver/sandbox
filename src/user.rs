@@ -1,6 +1,6 @@
 use std::io::Error;
 
-use super::{Annotatable, AnnotatedError};
+use super::util::{Annotatable, AnnotatedError};
 use libc;
 
 pub fn getuid() -> libc::uid_t {

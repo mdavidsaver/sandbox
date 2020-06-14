@@ -11,7 +11,6 @@ bindgen = "0.53"
 
 [dependencies]
 libc = "0.2"
-fork = "0.1"
 signal-hook = "0.1"
 log = { version = "0.4", features = ["std"] }
 env_logger = "0.7"
