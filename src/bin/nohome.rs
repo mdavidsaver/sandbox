@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::exit;
 use std::{env, fs, net};
@@ -32,20 +32,28 @@ fn mkdirs<S: AsRef<Path>>(name: S) -> Result<(), sandbox::AnnotatedError> {
 fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Box<dyn Error>> {
     // wait for child to unshare()
     let mut msg = vec![0; 1];
-    tochild.read_exact(&mut msg)?;
+    tochild.read_exact(&mut msg).or_else(|err| {
+        if err.kind() == io::ErrorKind::UnexpectedEof {
+            msg[0] = '!' as u8;
+            Ok(())
+        } else {
+            Err(err)
+        }
+    })?;
+    if (msg[0] as char) == '.' {
+        debug!("Parent set uid_map");
+        write_file(
+            format!("/proc/{}/uid_map", pid),
+            "0          0 4294967295\n".as_bytes(),
+        )?;
+        write_file(
+            format!("/proc/{}/gid_map", pid),
+            "0          0 4294967295\n".as_bytes(),
+        )?;
 
-    debug!("Parent set uid_map");
-    write_file(
-        format!("/proc/{}/uid_map", pid),
-        "0          0 4294967295\n".as_bytes(),
-    )?;
-    write_file(
-        format!("/proc/{}/gid_map", pid),
-        "0          0 4294967295\n".as_bytes(),
-    )?;
-
-    // notify client to proceed
-    tochild.write_all(".".as_bytes())?;
+        // notify client to proceed
+        tochild.write_all(".".as_bytes())?;
+    }
 
     debug!("Parent park");
     // wait for child to exit
@@ -59,7 +67,23 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
     sandbox::unshare(
         libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWUSER | libc::CLONE_NEWCGROUP,
     )
-    .annotate("unshare")?;
+    .annotate("unshare")
+    .or_else(|err| {
+        if let Some(_err) = err
+            .source()
+            .and_then(|err| err.downcast_ref::<io::Error>())
+            .filter(|err| err.kind() == io::ErrorKind::PermissionDenied)
+        {
+            eprintln!("Error: Insufficient permission to unshare.");
+            eprintln!("");
+            eprintln!("       Must either have root (uid 0), CAP_SYS_ADMIN,");
+            eprintln!("       or enable non-privlaged user namespaces by eg.");
+            eprintln!("");
+            eprintln!("       echo 1 > /proc/sys/kernel/unprivileged_userns_clone");
+            exit(1);
+        }
+        Err(err)
+    })?;
     // This process is now in the new mount, user, and cgroup namespaces.
     // But remains in the original pid namespace.
     // The grandchild will be pid 1 in the new pid namespace.

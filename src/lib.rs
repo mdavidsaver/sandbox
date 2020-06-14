@@ -64,19 +64,24 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
         signal_hook::SIGQUIT,
         signal_hook::SIGCHLD,
     ])?;
+    let mut isig = signals.forever();
+
     let mut cnt = 0;
-    for sig in signals.forever() {
-        match sig as libc::c_int {
-            signal_hook::SIGCHLD => {
+
+    loop {
+        match trywaitpid(pid) {
+            Err(err) => return Err(err),
+            Ok(TryWait::Busy) => (),
+            Ok(TryWait::Done(_child, sts)) => return Ok(sts),
+        }
+        debug!("Waiting for PID {}", pid);
+
+        match isig.next() {
+            Some(signal_hook::SIGCHLD) => {
                 debug!("SIGCHLD");
-                // child has (probably) exited
-                match trywaitpid(pid) {
-                    Err(err) => return Err(err),
-                    Ok(TryWait::Busy) => (),
-                    Ok(TryWait::Done(_child, sts)) => return Ok(sts),
-                }
+                // loop around to test child
             }
-            sig => {
+            Some(sig) => {
                 debug!("SIG {}", sig);
                 // we are being interrupted.
                 // be delicate with child at first
@@ -84,9 +89,11 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
                 cnt += 1;
                 kill(pid, num)?;
             }
+            None => {
+                unreachable!();
+            }
         }
     }
-    unreachable!();
 }
 
 pub fn unshare(flags: libc::c_int) -> Result<(), Error> {
