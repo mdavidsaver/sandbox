@@ -28,6 +28,10 @@ impl Proc {
         }
     }
 
+    pub fn id(&self) -> libc::pid_t {
+        self.pid
+    }
+
     /// Send signal to process
     pub fn signal(&self, sig: libc::c_int) -> Result<(), Error> {
         if !self.done {

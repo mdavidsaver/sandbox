@@ -8,10 +8,12 @@ use log::debug;
 
 use libc;
 
-use super::proc::{fork, Fork, Proc};
+use super::proc::{fork, Fork};
 use super::{ext, util};
 
-type Error = Box<dyn error::Error + 'static>;
+pub use super::proc::Proc;
+
+pub type Error = Box<dyn error::Error + 'static>;
 
 /// Container lifecycle hooks
 #[allow(unused_variables)]
@@ -306,5 +308,25 @@ mod tests {
         let mut result = String::new();
         me.read_to_string(&mut result).expect("Read results");
         assert_eq!(result, "ABCDE");
+    }
+
+    #[test]
+    fn map_args() {
+        let actual = IdMap::new_uid(0)
+            .add(0, 1, 2)
+            .add(15, 16, 2)
+            .map_args();
+
+        assert_eq!(actual, &["0", "1", "2", "15", "16", "2"]);
+    }
+
+    #[test]
+    fn map_file() {
+        let actual = IdMap::new_uid(0)
+            .add(0, 1, 2)
+            .add(15, 16, 2)
+            .map_file();
+
+        assert_eq!(actual, "0 1 2\n15 16 2\n");
     }
 }
