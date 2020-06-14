@@ -1,4 +1,4 @@
-use std::{error, fmt};
+use std::{error, fmt, fs};
 use std::io::Error;
 use std::net::TcpStream;
 use std::ffi::CString;
@@ -37,7 +37,7 @@ pub fn socketpair() -> Result<(TcpStream, TcpStream), AnnotatedError> {
 }
 
 pub enum TryWait {
-    Nope,
+    Busy,
     Done(libc::pid_t, i32),
 }
 
@@ -49,7 +49,7 @@ pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait, Error> {
         if ret==-1 {
             Err(Error::last_os_error())
         } else if ret==0 {
-            Ok(TryWait::Nope)
+            Ok(TryWait::Busy)
         } else {
             Ok(TryWait::Done(ret, libc::WEXITSTATUS(sts)))
         }
@@ -72,7 +72,7 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
             // child has (probably) exited
             match trywaitpid(pid) {
             Err(err) => return Err(err),
-            Ok(TryWait::Nope) => (),
+            Ok(TryWait::Busy) => (),
             Ok(TryWait::Done(_child, sts)) => return Ok(sts),
             }
         },
@@ -80,7 +80,7 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
             debug!("SIG {}", sig);
             // we are being interrupted.
             // be delicate with child at first
-            let num = if cnt<3 { sig } else { libc::SIGKILL };
+            let num = if cnt<2 { sig } else { libc::SIGKILL };
             cnt+=1;
             kill(pid, num)?;
         },
@@ -150,6 +150,19 @@ pub fn kill(pid: libc::pid_t, sig: libc::c_int) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::File, Error> {
+    let rawname = CString::new(fname.as_ref().to_string_lossy().as_ref())?;
+    let fd;
+    unsafe {
+        fd = libc::creat(rawname.as_ptr(), perm);
+        if fd<0 {
+            Err(Error::last_os_error())
+        } else {
+            Ok(fs::File::from_raw_fd(fd))
+        }
+    }
 }
 
 #[derive(Debug)]

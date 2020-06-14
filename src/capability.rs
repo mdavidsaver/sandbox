@@ -78,6 +78,7 @@ impl Cap {
         Ok(())
     }
 
+    /// Copy permitted to effective
     pub fn activate(&mut self) -> &mut Self {
         for i in 0..self.effective.len() {
             self.effective[i] = self.permitted[i];
@@ -109,6 +110,12 @@ impl Cap {
     pub fn clear(&mut self) -> &mut Self {
         self.clear_effective().clear_permitted().clear_inheritable()
     }
+
+    pub fn effective(&self, cap: u32) -> bool {
+        let word = cap/32;
+        let bit = cap%32;
+        0!=(self.effective[word as usize]&bit)
+    }
 }
 
 fn fmt_arr(arr: &[u32], f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -120,11 +127,11 @@ fn fmt_arr(arr: &[u32], f: &mut fmt::Formatter<'_>) -> fmt::Result {
 
 impl fmt::Display for Cap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EFF: 0x")?;
+        write!(f, "CapEff: 0x")?;
         fmt_arr(&self.effective, f)?;
-        write!(f, " PRM: 0x")?;
+        write!(f, " CapPrm: 0x")?;
         fmt_arr(&self.permitted, f)?;
-        write!(f, " INH: 0x")?;
+        write!(f, " CapInh: 0x")?;
         fmt_arr(&self.inheritable, f)?;
         Ok(())
     }

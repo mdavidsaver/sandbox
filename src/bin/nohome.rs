@@ -45,6 +45,8 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
 
     debug!("Parent park");
     // wait for child to exit
+    sandbox::setegid(sandbox::getgid())?;
+    sandbox::seteuid(sandbox::getuid())?;
     exit(sandbox::park(pid)?);
 }
 
@@ -68,6 +70,8 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
     match fork::fork() {
     Ok(Fork::Parent(pid)) => {
         debug!("Child park");
+        sandbox::setegid(sandbox::getgid())?;
+        sandbox::seteuid(sandbox::getuid())?;
         exit(sandbox::park(pid)?);
     }
     Ok(Fork::Child) => {
@@ -124,7 +128,7 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
         .annotate(format!("Run under {}, not {}", root.display(), cwd.display()))?;
 
     // temp locations of home and cwd under /tmp
-    let thome = tmp.join(relhome); // eg. /home/user -> /tmp/user
+    let _thome = tmp.join(relhome); // eg. /home/user -> /tmp/user
     let twd = tmp.join(relwd);
 
     let noopt = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
@@ -148,21 +152,6 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     mkdirs(&twd)?;
     sandbox::mount(&cwd, &twd, "", libc::MS_BIND)?;
 
-    // bind some special files RO under $HOME
-    for fname in &[".Xauthority"] {
-        let sfile = home.join(fname);
-        if !sfile.exists() {
-            continue;
-        }
-        let tfile = thome.join(fname);
-
-        debug!("bind file {} as {}", sfile.display(), tfile.display());
-        // create dnode
-        write_file(&tfile, "".as_bytes())?;
-
-        sandbox::mount(&sfile, &tfile, "", libc::MS_BIND|libc::MS_RDONLY)?;
-    }
-
     // hide real /home
     sandbox::mount(&tmp, &root, "", libc::MS_MOVE)?;
 
@@ -184,6 +173,10 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
         eprintln!("Usage: {} <cmd> [args ...]", rawargs[0]);
         exit(1);
     }
+
+    // final setup
+
+    debug!("EXEC {:?}", rawargs[1..].to_vec());
 
     sandbox::Exec::new(&rawargs[1])?
                     .args(&rawargs[1..].to_vec())?
