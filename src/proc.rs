@@ -1,14 +1,118 @@
 use std::collections::HashMap;
 use std::io::Error;
-use std::{env, ffi, io};
+use std::{env, ffi, fmt, io};
 
 use libc;
 use signal_hook;
 use signal_hook::iterator::Signals;
 
-use log::debug;
+use log::{debug, warn};
 
 use super::{Annotatable, AnnotatedError};
+
+/// Managed (child) process
+#[derive(Debug)]
+pub struct Proc {
+    pid: libc::pid_t,
+    done: bool,
+    code: i32,
+}
+
+impl Proc {
+    pub fn manage(pid: libc::pid_t) -> Proc {
+        assert!(pid > 0);
+        Proc {
+            pid: pid,
+            done: false,
+            code: -1, // poison
+        }
+    }
+
+    /// Send signal to process
+    pub fn signal(&self, sig: libc::c_int) -> Result<(), Error> {
+        if !self.done {
+            debug!("signal PID {} with {}", self.pid, sig);
+            unsafe {
+                if 0 != libc::kill(self.pid, sig) {
+                    return Err(Error::last_os_error());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Send SIGKILL to process
+    pub fn kill(&self) -> Result<(), Error> {
+        self.signal(libc::SIGKILL)
+    }
+
+    /// Block current process until child exits.
+    ///
+    pub fn park(&mut self) -> Result<i32, Error> {
+        if self.done {
+            return Ok(self.code);
+        }
+
+        let signals = Signals::new(&[
+            signal_hook::SIGTERM,
+            signal_hook::SIGINT,
+            signal_hook::SIGQUIT,
+            signal_hook::SIGCHLD,
+        ])?;
+        let mut isig = signals.forever();
+
+        let mut cnt = 0;
+
+        loop {
+            match trywaitpid(self.pid) {
+                Err(err) => return Err(err),
+                Ok(TryWait::Busy) => (),
+                Ok(TryWait::Done(_child, sts)) => {
+                    self.done = true;
+                    self.code = sts;
+                    return Ok(sts);
+                }
+            }
+            debug!("Waiting for PID {}", self.pid);
+
+            match isig.next() {
+                Some(signal_hook::SIGCHLD) => {
+                    debug!("SIGCHLD");
+                    // loop around to test child
+                }
+                Some(sig) => {
+                    debug!("SIG {}", sig);
+                    // we are being interrupted.
+                    // be delicate with child at first
+                    let num = if cnt < 2 { sig } else { libc::SIGKILL };
+                    cnt += 1;
+                    self.signal(num)?;
+                }
+                None => {
+                    unreachable!();
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Proc {
+    fn drop(&mut self) {
+        if let Err(err) = self.kill() {
+            warn!("unable to kill managed PID {} : {}", self.pid, err);
+        }
+    }
+}
+
+impl fmt::Display for Proc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.done {
+            write!(f, "PID {} Exit with {}", self.pid, self.code)
+        } else {
+            write!(f, "PID {}", self.pid)
+        }
+    }
+}
 
 pub fn kill(pid: libc::pid_t, sig: libc::c_int) -> Result<(), Error> {
     debug!("kill({},{})", pid, sig);
@@ -157,5 +261,20 @@ impl Exec {
             "exec cmd={:?} args={:?} env={:?}",
             self.cmd, self.args, self.env
         )))
+    }
+}
+
+pub enum Fork {
+    Parent(Proc),
+    Child,
+}
+
+pub fn fork() -> Result<Fork, Error> {
+    unsafe {
+        match libc::fork() {
+            err if err < 0 => return Err(Error::last_os_error()),
+            0 => Ok(Fork::Child),
+            pid => Ok(Fork::Parent(Proc::manage(pid))),
+        }
     }
 }
