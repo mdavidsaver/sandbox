@@ -9,6 +9,12 @@ pub fn getuid() -> libc::uid_t {
     }
 }
 
+pub fn geteuid() -> libc::uid_t {
+    unsafe {
+        libc::geteuid()
+    }
+}
+
 pub fn setuid(id: libc::uid_t) -> Result<(), AnnotatedError> {
     unsafe {
         if 0!=libc::setuid(id) {
@@ -32,6 +38,12 @@ pub fn seteuid(id: libc::uid_t) -> Result<(), AnnotatedError> {
 pub fn getgid() -> libc::gid_t {
     unsafe {
         libc::getgid()
+    }
+}
+
+pub fn getegid() -> libc::gid_t {
+    unsafe {
+        libc::getegid()
     }
 }
 

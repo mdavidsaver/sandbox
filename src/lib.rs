@@ -10,6 +10,8 @@ use libc;
 use signal_hook;
 use signal_hook::iterator::Signals;
 
+use log::debug;
+
 mod ext;
 
 mod capability;
@@ -66,6 +68,7 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
     for sig in signals.forever() {
         match sig as libc::c_int {
         signal_hook::SIGCHLD => {
+            debug!("SIGCHLD");
             // child has (probably) exited
             match trywaitpid(pid) {
             Err(err) => return Err(err),
@@ -74,6 +77,7 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
             }
         },
         sig => {
+            debug!("SIG {}", sig);
             // we are being interrupted.
             // be delicate with child at first
             let num = if cnt<3 { sig } else { libc::SIGKILL };
@@ -86,6 +90,7 @@ pub fn park(pid: libc::pid_t) -> Result<i32, Error> {
 }
 
 pub fn unshare(flags: libc::c_int) -> Result<(), Error> {
+    debug!("unshare(0x{:x})", flags);
     unsafe {
         if libc::unshare(flags) !=0 {
             return Err(Error::last_os_error());
@@ -121,6 +126,7 @@ pub fn mount_with_data<A,B,C, D>(src: A,
     let ctarget = CString::new(target.as_ref().to_string_lossy().as_ref())?;
     let cfstype = CString::new(fstype.as_ref().to_string_lossy().as_ref())?;
     let cdata = CString::new(data.as_ref().to_string_lossy().as_ref())?;
+    debug!("mount({:?},{:?},{:?},0x{:x},{:?})", csrc, ctarget, cfstype, flags, cdata);
     unsafe {
         if 0!=libc::mount(csrc.as_ptr() as *const i8,
                           ctarget.as_ptr() as *const i8,
@@ -137,6 +143,7 @@ pub fn mount_with_data<A,B,C, D>(src: A,
 }
 
 pub fn kill(pid: libc::pid_t, sig: libc::c_int) -> Result<(), Error> {
+    debug!("kill({},{})", pid, sig);
     unsafe {
         if 0!=libc::kill(pid, sig) {
             return Err(Error::last_os_error());

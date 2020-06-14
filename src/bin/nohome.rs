@@ -8,17 +8,24 @@ use libc;
 
 use fork::Fork;
 
+use log::debug;
+
 use sandbox;
 use sandbox::AnnotateResult;
 
 fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<(), sandbox::AnnotatedError> {
-    let mut file = fs::OpenOptions::new().write(true).open(name.as_ref())
+    debug!("write_file({}, ...)", name.as_ref().display());
+    let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(name.as_ref())
         .annotate(format!("write_file {} open",name.as_ref().display()))?;
     file.write_all(buf)
         .annotate(format!("write_file {} I/O",name.as_ref().display()))
 }
 
 fn mkdirs<S: AsRef<Path>>(name: S) -> Result<(), sandbox::AnnotatedError> {
+    debug!("mkdirs({})", name.as_ref().display());
     fs::create_dir_all(name.as_ref())
         .annotate(format!("mkdirs {}", name.as_ref().display()))
 }
@@ -29,18 +36,21 @@ fn handle_parent(pid: libc::pid_t, mut tochild: net::TcpStream) -> Result<(), Bo
     let mut msg = vec![0; 1];
     tochild.read_exact(&mut msg)?;
 
+    debug!("Parent set uid_map");
     write_file(format!("/proc/{}/uid_map", pid), "0          0 4294967295\n".as_bytes())?;
     write_file(format!("/proc/{}/gid_map", pid), "0          0 4294967295\n".as_bytes())?;
 
     // notify client to proceed
     tochild.write_all(".".as_bytes())?;
 
+    debug!("Parent park");
     // wait for child to exit
     exit(sandbox::park(pid)?);
 }
 
 fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
 
+    debug!("child unshare()");
     sandbox::unshare(libc::CLONE_NEWNS|libc::CLONE_NEWPID|libc::CLONE_NEWUSER|libc::CLONE_NEWCGROUP)
         .annotate("unshare")?;
     // This process is now in the new mount, user, and cgroup namespaces.
@@ -53,9 +63,11 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
     // wait for parent
     let mut msg = vec![0; 1];
     toparent.read_exact(&mut msg)?;
+    debug!("child continue");
 
     match fork::fork() {
     Ok(Fork::Parent(pid)) => {
+        debug!("Child park");
         exit(sandbox::park(pid)?);
     }
     Ok(Fork::Child) => {
@@ -71,6 +83,14 @@ fn handle_child(mut toparent: net::TcpStream) -> Result<(), Box<dyn Error>> {
 
 fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     // we are PID 1 with full capabilities
+    debug!("FS setup");
+
+    // clear SUID-ness, but retain capabilities
+    sandbox::setegid(sandbox::getgid())?;
+    sandbox::seteuid(sandbox::getuid())?;
+    // effective capabilities have been cleared.  permitted remain unset
+    debug!("Perms uid {},{} gid {},{}", sandbox::getuid(), sandbox::geteuid(), sandbox::getgid(), sandbox::getegid());
+    debug!("Cap {:?}", sandbox::capget(0)?);
 
     let tmp = Path::new("/tmp");
 
@@ -83,11 +103,26 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
         exit(1);
     }
 
+    // The root of the tree we ill hide.
+    // parent of $HOME eg. /home
+    // but not / itself (eg. $HOME==/root)
+    let root = home.parent()
+                   .filter(|p| { p!=&Path::new("/") })
+                   .unwrap_or(&home);
+
     let cwd = env::current_dir()?.canonicalize()?;
-    let relwd = cwd.strip_prefix(&home)
+
+    // enforce $PWD under $HOME
+    cwd.strip_prefix(&home)
         .annotate(format!("Run under {}, not {}", home.display(), cwd.display()))?;
 
-    // temp location of cwd under /tmp
+    let relhome = home.strip_prefix(&root)
+        .annotate(format!("Run under {}, not {}", root.display(), home.display()))?;
+    let relwd = cwd.strip_prefix(&root)
+        .annotate(format!("Run under {}, not {}", root.display(), cwd.display()))?;
+
+    // temp locations of home and cwd under /tmp
+    let thome = tmp.join(relhome); // eg. /home/user -> /tmp/user
     let twd = tmp.join(relwd);
 
     let noopt = libc::MS_NODEV|libc::MS_NOEXEC|libc::MS_NOSUID|libc::MS_RELATIME;
@@ -104,15 +139,30 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     sandbox::mount("none", "/sys/fs/cgroup/unified", "cgroup2", noopt)?;
 
     // begin preparing replacement /home
-    // will move /tmp -> /home after binding
+    // will move after binding
     sandbox::mount("none", &tmp, "tmpfs", noopt)?;
 
     // bind $CWD under new $HOME
     mkdirs(&twd)?;
     sandbox::mount(&cwd, &twd, "", libc::MS_BIND)?;
 
+    // bind some special files RO under $HOME
+    for fname in &[".Xauthority"] {
+        let sfile = home.join(fname);
+        if !sfile.exists() {
+            continue;
+        }
+        let tfile = thome.join(fname);
+
+        debug!("bind file {} as {}", sfile.display(), tfile.display());
+        // create dnode
+        write_file(&tfile, "".as_bytes())?;
+
+        sandbox::mount(&sfile, &tfile, "", libc::MS_BIND|libc::MS_RDONLY)?;
+    }
+
     // hide real /home
-    sandbox::mount(&tmp, &home, "", libc::MS_MOVE)?;
+    sandbox::mount(&tmp, &root, "", libc::MS_MOVE)?;
 
     // hide real temporary files to prevent snooping
     sandbox::mount("none", "/tmp", "tmpfs", noopt)?;
@@ -123,10 +173,10 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
     env::set_current_dir(cwd)?;
 
     // drop perm
-    sandbox::setegid(sandbox::getgid())?;
-    sandbox::seteuid(sandbox::getuid())?;
     sandbox::capclear()?;
-    eprintln!("Cap {:?}", sandbox::capget(0)?);
+    debug!("Drop perm");
+    debug!("Perms uid {},{} gid {},{}", sandbox::getuid(), sandbox::geteuid(), sandbox::getgid(), sandbox::getegid());
+    debug!("Cap {:?}", sandbox::capget(0)?);
 
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len()<=1 {
@@ -142,6 +192,8 @@ fn handle_grandchild() -> Result<(), Box<dyn Error>>  {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+
+    env_logger::init();
 
     let (parent, child) = sandbox::socketpair()?;
 
