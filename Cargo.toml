@@ -3,6 +3,10 @@ name = "sandbox"
 version = "0.1.0"
 authors = ["Michael Davidsaver <mdavidsaver@gmail.com>"]
 edition = "2018"
+license = "GPL-3"
+license-file = "LICENSE"
+description = "Lightweight partial Linux containers"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

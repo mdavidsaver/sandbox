@@ -3,8 +3,11 @@ set -e
 
 # simplify testing when testing when working directory is mounted nosuid
 
-sudo install -m 04755 target/debug/hidehome /usr/local/bin/hidehome
+name="$1"
+shift
 
-/usr/local/bin/hidehome "$@"
+sudo install -m 04755 target/debug/"$name" /usr/local/bin/"$name"
 
-sudo rm /usr/local/bin/hidehome
+/usr/local/bin/"$name" "$@"
+
+sudo rm /usr/local/bin/"$name"
