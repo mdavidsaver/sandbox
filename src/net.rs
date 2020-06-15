@@ -54,7 +54,7 @@ impl IFaceV4 {
     pub fn flags(&self) -> Result<u32, Error> {
         let req = self.req.clone();
         unsafe {
-            if libc::ioctl(self.sock.as_raw_fd(), libc::SIOCGIFFLAGS, &req)!=0 {
+            if ext::ioctl(self.sock.as_raw_fd(), ext::SIOCGIFFLAGS as ::std::os::raw::c_ulong, &req)!=0 {
                 Err(io::Error::last_os_error())?;
             }
             Ok(req.ifr_ifru.ifru_flags as u32)
@@ -65,7 +65,7 @@ impl IFaceV4 {
         let mut req = self.req.clone();
         unsafe {
             req.ifr_ifru.ifru_flags = flags as libc::c_short;
-            if libc::ioctl(self.sock.as_raw_fd(), libc::SIOCSIFFLAGS, &req)!=0 {
+            if ext::ioctl(self.sock.as_raw_fd(), ext::SIOCSIFFLAGS as ::std::os::raw::c_ulong, &req)!=0 {
                 Err(io::Error::last_os_error())?;
             }
             Ok(())
@@ -75,7 +75,7 @@ impl IFaceV4 {
     pub fn address(&self) -> Result<net::Ipv4Addr, Error> {
         let req = self.req.clone();
         unsafe {
-            if libc::ioctl(self.sock.as_raw_fd(), libc::SIOCGIFADDR, &req)!=0 {
+            if ext::ioctl(self.sock.as_raw_fd(), ext::SIOCGIFADDR as ::std::os::raw::c_ulong, &req)!=0 {
                 Err(io::Error::last_os_error())?;
             }
             if req.ifr_ifru.ifru_addr.sa_family!=libc::AF_INET as libc::sa_family_t  {
@@ -94,7 +94,7 @@ impl IFaceV4 {
             (*inaddr).sin_family = libc::AF_INET as libc::sa_family_t;
             (*inaddr).sin_port = 0;
             (*inaddr).sin_addr.s_addr = iaddr;
-            if libc::ioctl(self.sock.as_raw_fd(), libc::SIOCSIFADDR, &req)!=0 {
+            if ext::ioctl(self.sock.as_raw_fd(), ext::SIOCSIFADDR as ::std::os::raw::c_ulong, &req)!=0 {
                 Err(io::Error::last_os_error())?;
             }
         }
