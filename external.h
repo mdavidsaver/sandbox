@@ -1,4 +1,6 @@
 #include <linux/capability.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 // glibc includes the syscall wrappers, but doesn't make them public.
 // However, libcap has been depending on these for some time.

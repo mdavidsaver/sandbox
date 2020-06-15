@@ -14,11 +14,7 @@ pub struct Cap {
 const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as usize;
 
 fn empty_data() -> ext::__user_cap_data_struct {
-    ext::__user_cap_data_struct {
-        effective: 0,
-        inheritable: 0,
-        permitted: 0,
-    }
+    ext::__user_cap_data_struct::default()
 }
 
 impl Cap {
