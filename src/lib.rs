@@ -12,6 +12,3 @@ pub use container::ContainerHooks;
 pub use container::Error;
 
 pub mod util;
-
-pub mod hidehome;
-pub mod nonet;

@@ -4,6 +4,8 @@ use std::io::Error;
 use super::ext;
 use libc;
 
+pub use super::ext::CAP_SYS_ADMIN;
+
 #[derive(Debug, Clone)]
 pub struct Cap {
     pub effective: Vec<u32>,

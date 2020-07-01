@@ -4,6 +4,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use super::{Error, ext, util};
 
+pub use ext::IFF_UP;
+
 pub const LOOPBACK: &str = "lo";
 
 // for lack of Ipv4Addr::integer() -> u32
