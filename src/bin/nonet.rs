@@ -1,12 +1,12 @@
-use std::{env, process};
 use std::net::Ipv4Addr;
+use std::{env, process};
 
 use libc;
 use log::debug;
 
-use sandbox::{runc, Error};
-use sandbox::container::{ContainerHooks};
+use sandbox::container::ContainerHooks;
 use sandbox::{net, util};
+use sandbox::{runc, Error};
 
 pub struct NoNet {
     args: Vec<String>,
@@ -23,9 +23,7 @@ impl NoNet {
         for arg in args {
             cmd.push(arg.as_ref().to_string());
         }
-        NoNet {
-            args: cmd,
-        }
+        NoNet { args: cmd }
     }
 }
 
@@ -45,7 +43,7 @@ impl ContainerHooks for NoNet {
         lo.set_address(Ipv4Addr::LOCALHOST)?;
 
         let flags = lo.flags()?;
-        if 0==(flags&net::IFF_UP) {
+        if 0 == (flags & net::IFF_UP) {
             debug!("Bring lo UP");
             lo.set_flags(net::IFF_UP | flags)?;
         }

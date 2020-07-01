@@ -4,10 +4,10 @@ use std::{env, process};
 use libc;
 use log::debug;
 
-use sandbox::{runc, Error};
 use sandbox::container::{ContainerHooks, IdMap, Proc};
 use sandbox::util;
 use sandbox::util::AnnotateResult;
+use sandbox::{runc, Error};
 
 /// Container which executes a command with most of /home hidden
 pub struct HideHome {

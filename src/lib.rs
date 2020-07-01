@@ -2,9 +2,9 @@ mod ext;
 
 mod capability;
 
+pub mod net;
 mod proc;
 mod user;
-pub mod net;
 
 pub mod container;
 pub use container::runc;
