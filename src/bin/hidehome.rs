@@ -6,29 +6,23 @@ use log::debug;
 
 use sandbox::container::{ContainerHooks, IdMap, Proc};
 use sandbox::util;
-use sandbox::util::AnnotateResult;
 use sandbox::{runc, Error};
 
 /// Container which executes a command with most of /home hidden
-pub struct HideHome {
+struct HideHome {
     isuser: bool,
     args: Vec<String>,
 }
 
 impl HideHome {
-    pub fn new<A, B, I>(cmd: A, args: I) -> Result<HideHome, Error>
+    pub fn new<I>(args: I) -> Result<HideHome, Error>
     where
-        A: AsRef<str>,
-        B: AsRef<str>,
-        I: IntoIterator<Item = B>,
+        I: IntoIterator,
+        I::Item: Into<String>,
     {
-        let mut cmd = vec![cmd.as_ref().to_string()];
-        for arg in args {
-            cmd.push(arg.as_ref().to_string());
-        }
         Ok(HideHome {
             isuser: !util::Cap::current()?.effective(util::CAP_SYS_ADMIN),
-            args: cmd,
+            args: args.into_iter().map(|e| e.into()).collect(),
         })
     }
 }
@@ -133,10 +127,10 @@ impl ContainerHooks for HideHome {
     }
 
     fn setup(&self) -> Result<(), Error> {
-        debug!("EXEC {:?}", &self.args[1..]);
+        debug!("EXEC {:?}", &self.args[0..]);
 
-        util::Exec::new(&self.args[1])?
-            .args(&self.args[1..])?
+        util::Exec::new(&self.args[0])?
+            .args(&self.args[0..])?
             .exec()?;
 
         Ok(())
@@ -152,7 +146,7 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    runc(&HideHome::new(&rawargs[1], &rawargs[1..])?)?;
+    runc(&HideHome::new(&rawargs[1..])?)?;
 
     Ok(())
 }

@@ -1,6 +1,8 @@
-use std::net::{self, TcpStream};
+use std::net::{self, Ipv4Addr, TcpStream};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::{io, ptr};
+
+use log;
 
 use super::{ext, util, Error};
 
@@ -121,6 +123,22 @@ impl IFaceV4 {
         }
         Ok(())
     }
+}
+
+/// Bring the "lo" interface UP with 127.0.0.1
+pub fn configure_lo() -> Result<(), Error> {
+    let lo = IFaceV4::new(LOOPBACK)?;
+
+    log::debug!("Set lo address");
+    lo.set_address(Ipv4Addr::LOCALHOST)?;
+
+    let flags = lo.flags()?;
+    if 0 == (flags & IFF_UP) {
+        log::debug!("Bring lo UP");
+        lo.set_flags(IFF_UP | flags)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

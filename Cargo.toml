@@ -4,20 +4,16 @@ version = "0.1.0"
 authors = ["Michael Davidsaver <mdavidsaver@gmail.com>"]
 edition = "2018"
 license = "GPL-3"
-license-file = "LICENSE"
 description = "Lightweight partial Linux containers"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-bindgen = "0.53"
+bindgen = "0.55"
 
 [dependencies]
 libc = "0.2"
 signal-hook = "0.1"
 log = { version = "0.4", features = ["std"] }
 env_logger = "0.7"
-
-[profile.release]
-lto = true

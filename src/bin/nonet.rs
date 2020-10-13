@@ -1,4 +1,3 @@
-use std::net::Ipv4Addr;
 use std::{env, process};
 
 use libc;
@@ -8,23 +7,8 @@ use sandbox::container::ContainerHooks;
 use sandbox::{net, util};
 use sandbox::{runc, Error};
 
-pub struct NoNet {
+struct NoNet {
     args: Vec<String>,
-}
-
-impl NoNet {
-    pub fn new<A, B, I>(cmd: A, args: I) -> NoNet
-    where
-        A: AsRef<str>,
-        B: AsRef<str>,
-        I: IntoIterator<Item = B>,
-    {
-        let mut cmd = vec![cmd.as_ref().to_string()];
-        for arg in args {
-            cmd.push(arg.as_ref().to_string());
-        }
-        NoNet { args: cmd }
-    }
 }
 
 impl ContainerHooks for NoNet {
@@ -37,25 +21,14 @@ impl ContainerHooks for NoNet {
     fn setup_priv(&self) -> Result<(), Error> {
         // setup loopback only
 
-        let lo = net::IFaceV4::new(net::LOOPBACK)?;
-
-        debug!("Set lo address");
-        lo.set_address(Ipv4Addr::LOCALHOST)?;
-
-        let flags = lo.flags()?;
-        if 0 == (flags & net::IFF_UP) {
-            debug!("Bring lo UP");
-            lo.set_flags(net::IFF_UP | flags)?;
-        }
-
-        Ok(())
+        net::configure_lo()
     }
 
     fn setup(&self) -> Result<(), Error> {
-        debug!("EXEC {:?}", &self.args[1..]);
+        debug!("EXEC {:?}", &self.args[0..]);
 
-        util::Exec::new(&self.args[1])?
-            .args(&self.args[1..])?
+        util::Exec::new(&self.args[0])?
+            .args(&self.args[0..])?
             .exec()?;
 
         Ok(())
@@ -71,7 +44,9 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    runc(&NoNet::new(&rawargs[1], &rawargs[1..]))?;
+    runc(&NoNet {
+        args: rawargs[1..].to_vec(),
+    })?;
 
     Ok(())
 }

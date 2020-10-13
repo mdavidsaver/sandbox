@@ -91,9 +91,9 @@ where
     );
     unsafe {
         if 0 != libc::mount(
-            csrc.as_ptr() as *const i8,
-            ctarget.as_ptr() as *const i8,
-            cfstype.as_ptr() as *const i8,
+            csrc.as_ptr() as *const libc::c_char,
+            ctarget.as_ptr() as *const libc::c_char,
+            cfstype.as_ptr() as *const libc::c_char,
             flags,
             cdata.as_ptr() as *const libc::c_void,
         ) {
@@ -176,6 +176,13 @@ impl<V, E: Annotatable + 'static> AnnotateResult for Result<V, E> {
     type Value = V;
     fn annotate<S: AsRef<str>>(self, msg: S) -> Result<Self::Value, AnnotatedError> {
         self.map_err(|e| e.annotate(msg.as_ref()))
+    }
+}
+
+pub fn error<S: Into<String>>(msg: S) -> AnnotatedError {
+    AnnotatedError {
+        msg: msg.into(),
+        err: None,
     }
 }
 
