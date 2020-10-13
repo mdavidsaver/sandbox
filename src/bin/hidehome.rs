@@ -68,7 +68,7 @@ impl ContainerHooks for HideHome {
             process::exit(1);
         }
 
-        // The root of the tree we ill hide.
+        // The root of the tree we will hide.
         // parent of $HOME eg. /home
         // but not / itself (eg. $HOME==/root)
         let root = home
@@ -85,11 +85,6 @@ impl ContainerHooks for HideHome {
             cwd.display()
         ))?;
 
-        let relhome = home.strip_prefix(&root).annotate(format!(
-            "Run under {}, not {}",
-            root.display(),
-            home.display()
-        ))?;
         let relwd = cwd.strip_prefix(&root).annotate(format!(
             "Run under {}, not {}",
             root.display(),
@@ -97,7 +92,6 @@ impl ContainerHooks for HideHome {
         ))?;
 
         // temp locations of home and cwd under /tmp
-        let _thome = tmp.join(relhome); // eg. /home/user -> /tmp/user
         let twd = tmp.join(relwd);
 
         let noopt = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
