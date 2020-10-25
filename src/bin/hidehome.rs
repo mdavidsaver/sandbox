@@ -72,21 +72,9 @@ impl ContainerHooks for HideHome {
 
         let cwd = env::current_dir()?.canonicalize()?;
 
-        // enforce $PWD under $HOME
-        cwd.strip_prefix(&home).annotate(format!(
-            "Run under {}, not {}",
-            home.display(),
-            cwd.display()
-        ))?;
-
-        let relwd = cwd.strip_prefix(&root).annotate(format!(
-            "Run under {}, not {}",
-            root.display(),
-            cwd.display()
-        ))?;
-
-        // temp locations of home and cwd under /tmp
-        let twd = tmp.join(relwd);
+        if cwd.starts_with(tmp) {
+            Err(util::error("Can't run under /tmp"))?;
+        }
 
         let noopt = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
 
@@ -108,9 +96,18 @@ impl ContainerHooks for HideHome {
         // will move after binding
         util::mount("none", &tmp, "tmpfs", noopt)?;
 
-        // bind $CWD under new $HOME
-        util::mkdirs(&twd)?;
-        util::mount(&cwd, &twd, "", libc::MS_BIND)?;
+        if let Some(relwd) = cwd.strip_prefix(&root).ok() {
+            // $CWD is under /home
+            // temp locations of home and cwd under /tmp
+            let twd = tmp.join(relwd);
+
+            // bind $CWD under new $HOME
+            util::mkdirs(&twd)?;
+            util::mount(&cwd, &twd, "", libc::MS_BIND)?;
+
+        } else {
+            util::mkdirs(&home)?;
+        }
 
         // hide real /home
         util::mount(&tmp, &root, "", libc::MS_MOVE)?;
