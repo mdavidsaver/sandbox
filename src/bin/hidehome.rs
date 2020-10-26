@@ -73,7 +73,8 @@ impl ContainerHooks for HideHome {
         let cwd = env::current_dir()?.canonicalize()?;
 
         if cwd.starts_with(tmp) {
-            Err(util::error("Can't run under /tmp"))?;
+            eprintln!("Can't run under /tmp");
+            process::exit(1);
         }
 
         let noopt = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
@@ -104,7 +105,6 @@ impl ContainerHooks for HideHome {
             // bind $CWD under new $HOME
             util::mkdirs(&twd)?;
             util::mount(&cwd, &twd, "", libc::MS_BIND)?;
-
         } else {
             util::mkdirs(&home)?;
         }

@@ -1,8 +1,8 @@
 use std::ffi::CString;
-use std::io::{Error, Write};
+use std::fs;
+use std::io::Write;
 use std::net::TcpStream;
 use std::path::Path;
-use std::{error, fmt, fs};
 
 use std::os::unix::io::FromRawFd;
 
@@ -12,30 +12,31 @@ use log::debug;
 
 pub use super::capability::*;
 pub use super::container::*;
+use super::err::{Error, Result};
 pub use super::proc::*;
 pub use super::user::*;
 
-pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<(), AnnotatedError> {
+pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<()> {
     debug!("write_file({}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(name.as_ref())
-        .annotate(format!("write_file {} open", name.as_ref().display()))?;
+        .map_err(|e| Error::file("open", name.as_ref(), e))?;
     file.write_all(buf)
-        .annotate(format!("write_file {} I/O", name.as_ref().display()))
+        .map_err(|e| Error::file("write", name.as_ref(), e))
 }
 
-pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<(), AnnotatedError> {
+pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<()> {
     debug!("mkdirs({})", name.as_ref().display());
-    fs::create_dir_all(name.as_ref()).annotate(format!("mkdirs {}", name.as_ref().display()))
+    fs::create_dir_all(name.as_ref()).map_err(|e| Error::file("mkdirs", name.as_ref(), e))
 }
 
-pub fn socketpair() -> Result<(TcpStream, TcpStream), AnnotatedError> {
+pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
     let mut fds = vec![0, 2];
     unsafe {
         if 0 != libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) {
-            return Err(Error::last_os_error().annotate("socketpair"));
+            return Err(Error::last_os_error("socketpair"));
         }
         Ok((
             TcpStream::from_raw_fd(fds[0]),
@@ -44,22 +45,17 @@ pub fn socketpair() -> Result<(TcpStream, TcpStream), AnnotatedError> {
     }
 }
 
-pub fn unshare(flags: libc::c_int) -> Result<(), Error> {
+pub fn unshare(flags: libc::c_int) -> Result<()> {
     debug!("unshare(0x{:x})", flags);
     unsafe {
         if libc::unshare(flags) != 0 {
-            return Err(Error::last_os_error());
+            return Err(Error::last_os_error("unshare"));
         }
     }
     Ok(())
 }
 
-pub fn mount<A, B, C>(
-    src: A,
-    target: B,
-    fstype: C,
-    flags: libc::c_ulong,
-) -> Result<(), Box<dyn error::Error + 'static>>
+pub fn mount<A, B, C>(src: A, target: B, fstype: C, flags: libc::c_ulong) -> Result<()>
 where
     A: AsRef<Path>,
     B: AsRef<Path>,
@@ -74,7 +70,7 @@ pub fn mount_with_data<A, B, C, D>(
     fstype: C,
     flags: libc::c_ulong,
     data: D,
-) -> Result<(), Box<dyn error::Error + 'static>>
+) -> Result<()>
 where
     A: AsRef<Path>,
     B: AsRef<Path>,
@@ -97,7 +93,7 @@ where
             flags,
             cdata.as_ptr() as *const libc::c_void,
         ) {
-            Err(Error::last_os_error().annotate(&format!(
+            Err(Error::last_os_error(format!(
                 "mount src={:?} target={:?} fs={:?} flags=0x{:x} data=",
                 src.as_ref(),
                 target.as_ref(),
@@ -109,80 +105,16 @@ where
     Ok(())
 }
 
-pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::File, Error> {
+pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::File> {
     let rawname = CString::new(fname.as_ref().to_string_lossy().as_ref())?;
     let fd;
     unsafe {
         fd = libc::creat(rawname.as_ptr(), perm);
         if fd < 0 {
-            Err(Error::last_os_error())
+            Err(Error::last_file_error("creat", fname))
         } else {
             Ok(fs::File::from_raw_fd(fd))
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct AnnotatedError {
-    msg: String,
-    err: Option<Box<dyn error::Error + 'static>>,
-}
-
-impl AnnotatedError {
-    pub fn new<S: AsRef<str>>(msg: S) -> AnnotatedError {
-        AnnotatedError {
-            msg: msg.as_ref().to_string(),
-            err: None,
-        }
-    }
-}
-
-impl error::Error for AnnotatedError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.err.as_ref().map(|e| e.as_ref())
-    }
-}
-
-impl fmt::Display for AnnotatedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &self.msg)
-    }
-}
-
-/// Add a context message to an Error
-pub trait Annotatable: error::Error {
-    /// Turn any Error into an AnnotatedError
-    fn annotate<S: AsRef<str>>(self, msg: S) -> AnnotatedError
-    where
-        Self: Sized + 'static,
-    {
-        AnnotatedError {
-            msg: msg.as_ref().to_string(),
-            err: Some(Box::new(self)),
-        }
-    }
-}
-
-// allow any Error to be annotated
-impl<E: error::Error + ?Sized> Annotatable for E {}
-
-pub trait AnnotateResult {
-    type Value;
-    fn annotate<S: AsRef<str>>(self, msg: S) -> Result<Self::Value, AnnotatedError>;
-}
-
-// Allow Result to be annotated
-impl<V, E: Annotatable + 'static> AnnotateResult for Result<V, E> {
-    type Value = V;
-    fn annotate<S: AsRef<str>>(self, msg: S) -> Result<Self::Value, AnnotatedError> {
-        self.map_err(|e| e.annotate(msg.as_ref()))
-    }
-}
-
-pub fn error<S: Into<String>>(msg: S) -> AnnotatedError {
-    AnnotatedError {
-        msg: msg.into(),
-        err: None,
     }
 }
 

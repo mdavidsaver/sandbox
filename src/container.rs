@@ -9,7 +9,7 @@ use log::debug;
 use libc;
 
 use super::proc::{fork, Fork};
-use super::{ext, util};
+use super::{err, ext, util};
 
 pub use super::proc::Proc;
 
@@ -282,7 +282,7 @@ impl IdMap {
                 .args(args)
                 .status()?
                 .code()
-                .ok_or(util::AnnotatedError::new("newuidmap errors"))?;
+                .ok_or(err::Error::UIDMap)?;
         }
 
         Ok(())

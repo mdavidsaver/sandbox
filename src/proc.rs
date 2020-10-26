@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::io::Error;
-use std::{env, ffi, fmt, io};
+use std::{env, ffi, fmt};
 
 use libc;
 use signal_hook;
@@ -8,7 +7,7 @@ use signal_hook::iterator::Signals;
 
 use log::{debug, warn};
 
-use super::util::{Annotatable, AnnotatedError};
+use super::err::{Error, Result};
 
 /// Managed (child) process
 #[derive(Debug)]
@@ -33,12 +32,15 @@ impl Proc {
     }
 
     /// Send signal to process
-    pub fn signal(&self, sig: libc::c_int) -> Result<(), Error> {
+    pub fn signal(&self, sig: libc::c_int) -> Result<()> {
         if !self.done {
             debug!("signal PID {} with {}", self.pid, sig);
             unsafe {
                 if 0 != libc::kill(self.pid, sig) {
-                    return Err(Error::last_os_error());
+                    return Err(Error::last_os_error(format!(
+                        "Unable to signal {} with {}",
+                        self.pid, sig
+                    )));
                 }
             }
         }
@@ -46,13 +48,13 @@ impl Proc {
     }
 
     /// Send SIGKILL to process
-    pub fn kill(&self) -> Result<(), Error> {
+    pub fn kill(&self) -> Result<()> {
         self.signal(libc::SIGKILL)
     }
 
     /// Block current process until child exits.
     ///
-    pub fn park(&mut self) -> Result<i32, Error> {
+    pub fn park(&mut self) -> Result<i32> {
         if self.done {
             return Ok(self.code);
         }
@@ -62,7 +64,8 @@ impl Proc {
             signal_hook::SIGINT,
             signal_hook::SIGQUIT,
             signal_hook::SIGCHLD,
-        ])?;
+        ])
+        .map_err(|e| Error::os("Install signal handler", e))?;
         let mut isig = signals.forever();
 
         let mut cnt = 0;
@@ -124,12 +127,12 @@ pub enum TryWait {
 }
 
 /// Wraps waitpid()
-pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait, Error> {
+pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait> {
     let mut sts = 0;
     unsafe {
         let ret = libc::waitpid(pid, &mut sts, libc::WNOHANG);
         if ret == -1 {
-            Err(Error::last_os_error())
+            Err(Error::last_os_error(format!("waitpid({})", pid)))
         } else if ret == 0 {
             Ok(TryWait::Busy)
         } else {
@@ -145,20 +148,16 @@ pub struct Exec {
 }
 
 impl Exec {
-    pub fn new<T>(cmd: T) -> Result<Exec, ffi::NulError>
-    where
-        T: AsRef<str>,
-    {
+    pub fn new<T: AsRef<str>>(cmd: T) -> Result<Exec> {
         let mut es = HashMap::new();
 
         // initially populate with process environment
-        env::vars().try_for_each(|(k, v)| {
+        for (k, v) in env::vars() {
             es.insert(
                 k.clone(),
                 ffi::CString::new(format!("{}={}", &k, &v).as_bytes())?,
             );
-            Ok(())
-        })?;
+        }
 
         Ok(Exec {
             cmd: ffi::CString::new(cmd.as_ref())?,
@@ -167,15 +166,14 @@ impl Exec {
         })
     }
 
-    pub fn args<I>(&mut self, args: I) -> Result<&mut Self, ffi::NulError>
+    pub fn args<I>(&mut self, args: I) -> Result<&mut Self>
     where
         I: IntoIterator,
         I::Item: AsRef<str>,
     {
-        args.into_iter().try_for_each(|s| {
+        for s in args.into_iter() {
             self.args.push(ffi::CString::new(s.as_ref())?);
-            Ok(())
-        })?;
+        }
         Ok(self)
     }
 
@@ -184,7 +182,7 @@ impl Exec {
         self
     }
 
-    pub fn env<'a, T>(&mut self, name: T, value: T) -> Result<&mut Self, ffi::NulError>
+    pub fn env<'a, T>(&mut self, name: T, value: T) -> Result<&mut Self>
     where
         T: Into<&'a str>,
     {
@@ -198,7 +196,7 @@ impl Exec {
         self
     }
 
-    pub fn exec(&self) -> Result<(), AnnotatedError> {
+    pub fn exec(&self) -> Result<()> {
         let cmd = self.cmd.as_ptr();
         let mut args: Vec<*const libc::c_char> = self.args.iter().map(|s| s.as_ptr()).collect();
         let mut env: Vec<*const libc::c_char> = self.env.iter().map(|(_k, v)| v.as_ptr()).collect();
@@ -209,12 +207,11 @@ impl Exec {
         Err(unsafe {
             libc::execvpe(cmd, args.as_ptr(), env.as_ptr());
             // only returns on error
-            io::Error::last_os_error()
-        }
-        .annotate(&format!(
-            "exec cmd={:?} args={:?} env={:?}",
-            self.cmd, self.args, self.env
-        )))
+            Error::last_os_error(format!(
+                "exec cmd={:?} args={:?} env={:?}",
+                self.cmd, self.args, self.env
+            ))
+        })
     }
 }
 
@@ -223,10 +220,10 @@ pub enum Fork {
     Child,
 }
 
-pub fn fork() -> Result<Fork, Error> {
+pub fn fork() -> Result<Fork> {
     unsafe {
         match libc::fork() {
-            err if err < 0 => return Err(Error::last_os_error()),
+            err if err < 0 => return Err(Error::last_os_error("fork")),
             0 => Ok(Fork::Child),
             pid => Ok(Fork::Parent(Proc::manage(pid))),
         }

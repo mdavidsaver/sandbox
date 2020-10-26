@@ -1,12 +1,14 @@
 use std::net::{self, Ipv4Addr, TcpStream};
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::{io, ptr};
+use std::ptr;
 
 use log;
 
-use super::{ext, util, Error};
+use super::ext;
 
 pub use ext::IFF_UP;
+
+use super::err::{Error, Result};
 
 pub const LOOPBACK: &str = "lo";
 
@@ -28,18 +30,18 @@ pub struct IFaceV4 {
 }
 
 impl IFaceV4 {
-    pub fn new<S: AsRef<str>>(name: S) -> Result<IFaceV4, Error> {
+    pub fn new<S: AsRef<str>>(name: S) -> Result<IFaceV4> {
         let rawname = name.as_ref().as_bytes().to_vec();
         let mut req = ext::ifreq::default();
         let sock;
         unsafe {
             if rawname.len() >= ::std::mem::size_of_val(&req.ifr_ifrn.ifrn_name) {
-                Err(util::AnnotatedError::new("Interface name too long"))?;
+                Err(Error::TooLong)?;
             }
 
             let ret = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             if ret < 0 {
-                Err(io::Error::last_os_error())?;
+                Err(Error::last_os_error("socket()"))?;
             }
             sock = TcpStream::from_raw_fd(ret);
 
@@ -54,7 +56,7 @@ impl IFaceV4 {
         Ok(IFaceV4 { req, sock })
     }
 
-    pub fn flags(&self) -> Result<u32, Error> {
+    pub fn flags(&self) -> Result<u32> {
         let req = self.req.clone();
         unsafe {
             if ext::ioctl(
@@ -63,13 +65,13 @@ impl IFaceV4 {
                 &req,
             ) != 0
             {
-                Err(io::Error::last_os_error())?;
+                Err(Error::last_os_error("ioctl(SIOCGIFFLAGS)"))?;
             }
             Ok(req.ifr_ifru.ifru_flags as u32)
         }
     }
 
-    pub fn set_flags(&self, flags: u32) -> Result<(), Error> {
+    pub fn set_flags(&self, flags: u32) -> Result<()> {
         let mut req = self.req.clone();
         unsafe {
             req.ifr_ifru.ifru_flags = flags as libc::c_short;
@@ -79,13 +81,13 @@ impl IFaceV4 {
                 &req,
             ) != 0
             {
-                Err(io::Error::last_os_error())?;
+                Err(Error::last_os_error("ioctl(SIOCSIFFLAGS)"))?;
             }
             Ok(())
         }
     }
 
-    pub fn address(&self) -> Result<net::Ipv4Addr, Error> {
+    pub fn address(&self) -> Result<net::Ipv4Addr> {
         let req = self.req.clone();
         unsafe {
             if ext::ioctl(
@@ -94,17 +96,17 @@ impl IFaceV4 {
                 &req,
             ) != 0
             {
-                Err(io::Error::last_os_error())?;
+                Err(Error::last_os_error("ioctl(SIOCGIFADDR)"))?;
             }
             if req.ifr_ifru.ifru_addr.sa_family != libc::AF_INET as libc::sa_family_t {
-                Err(util::AnnotatedError::new("Not IPv4"))?;
+                Err(Error::NotIPv4)?;
             }
             let inaddr = &req.ifr_ifru.ifru_addr as *const _ as *const libc::sockaddr_in;
             Ok(net::Ipv4Addr::from(u32::from_be((*inaddr).sin_addr.s_addr)))
         }
     }
 
-    pub fn set_address(&self, addr: net::Ipv4Addr) -> Result<(), Error> {
+    pub fn set_address(&self, addr: net::Ipv4Addr) -> Result<()> {
         let iaddr = b2u32(addr.octets());
         let mut req = self.req.clone();
         unsafe {
@@ -118,7 +120,7 @@ impl IFaceV4 {
                 &req,
             ) != 0
             {
-                Err(io::Error::last_os_error())?;
+                Err(Error::last_os_error("ioctl(SIOCSIFADDR)"))?;
             }
         }
         Ok(())
@@ -126,7 +128,7 @@ impl IFaceV4 {
 }
 
 /// Bring the "lo" interface UP with 127.0.0.1
-pub fn configure_lo() -> Result<(), Error> {
+pub fn configure_lo() -> Result<()> {
     let lo = IFaceV4::new(LOOPBACK)?;
 
     log::debug!("Set lo address");

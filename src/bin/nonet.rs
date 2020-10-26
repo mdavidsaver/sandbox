@@ -21,7 +21,9 @@ impl ContainerHooks for NoNet {
     fn setup_priv(&self) -> Result<(), Error> {
         // setup loopback only
 
-        net::configure_lo()
+        net::configure_lo()?;
+
+        Ok(())
     }
 
     fn setup(&self) -> Result<(), Error> {

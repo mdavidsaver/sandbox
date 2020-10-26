@@ -1,7 +1,10 @@
+mod err;
+
 mod ext;
 
 mod capability;
 
+pub mod fs;
 pub mod net;
 mod proc;
 mod user;
