@@ -14,28 +14,29 @@ use super::{err, ext, util};
 pub use super::proc::Proc;
 
 pub type Error = Box<dyn error::Error + 'static>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Container lifecycle hooks
 #[allow(unused_variables)]
 pub trait ContainerHooks {
     /// Called in parent process before child is forked
-    fn at_start(&self) -> Result<(), Error> {
+    fn at_start(&self) -> Result<()> {
         Ok(())
     }
     /// Called from child process when time to unshare()
-    fn unshare(&self) -> Result<(), Error> {
+    fn unshare(&self) -> Result<()> {
         Ok(())
     }
     /// Called from parent when time to set child uid/gid_map.
-    fn set_id_map(&self, pid: &Proc) -> Result<(), Error> {
+    fn set_id_map(&self, pid: &Proc) -> Result<()> {
         Ok(())
     }
     /// Called from grandchild with full privlage (all capabilities)
-    fn setup_priv(&self) -> Result<(), Error> {
+    fn setup_priv(&self) -> Result<()> {
         Ok(())
     }
     /// Called from grandchild with final privlage (no capabilities)
-    fn setup(&self) -> Result<(), Error> {
+    fn setup(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -44,7 +45,7 @@ fn handle_parent<H: ContainerHooks>(
     hooks: &H,
     mut pid: Proc,
     mut tochild: net::TcpStream,
-) -> Result<i32, Error> {
+) -> Result<i32> {
     // wait for child to unshare()
     let mut msg = vec![0; 1];
     tochild.read_exact(&mut msg).or_else(|err| {
@@ -73,7 +74,7 @@ fn handle_parent<H: ContainerHooks>(
     Ok(pid.park()?)
 }
 
-fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> Result<(), Error> {
+fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> Result<()> {
     hooks
         .unshare()
         //.annotate("HOOK unshare()")
@@ -133,7 +134,7 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
     }
 }
 
-fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<(), Error> {
+fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<()> {
     debug!("Grandchild");
 
     debug!(
@@ -180,7 +181,7 @@ fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<(), Error> {
 }
 
 /// Launch container with given hooks.
-pub fn runc<H: ContainerHooks>(hooks: &H) -> Result<i32, Error> {
+pub fn runc<H: ContainerHooks>(hooks: &H) -> Result<i32> {
     // communications between parent and child to coordinate SetIdMap()
 
     hooks.at_start()?;
@@ -256,7 +257,7 @@ impl IdMap {
             })
     }
 
-    pub fn write(&self) -> Result<(), Error> {
+    pub fn write(&self) -> Result<()> {
         let caps = util::Cap::current()?;
 
         if self.isuid && caps.effective(ext::CAP_SETUID) {
@@ -307,23 +308,23 @@ mod tests {
     }
 
     impl ContainerHooks for TestHooks {
-        fn at_start(&self) -> Result<(), Error> {
+        fn at_start(&self) -> Result<()> {
             self.at("A");
             Ok(())
         }
-        fn unshare(&self) -> Result<(), Error> {
+        fn unshare(&self) -> Result<()> {
             self.at("B");
             Ok(())
         }
-        fn set_id_map(&self, _pid: &Proc) -> Result<(), Error> {
+        fn set_id_map(&self, _pid: &Proc) -> Result<()> {
             self.at("C");
             Ok(())
         }
-        fn setup_priv(&self) -> Result<(), Error> {
+        fn setup_priv(&self) -> Result<()> {
             self.at("D");
             Ok(())
         }
-        fn setup(&self) -> Result<(), Error> {
+        fn setup(&self) -> Result<()> {
             self.at("E");
             Ok(())
         }
