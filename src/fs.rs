@@ -1,5 +1,6 @@
-use std::fs;
+use std::{fs, rc};
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use std::os::unix::fs::MetadataExt;
 
@@ -39,6 +40,113 @@ pub fn find_mount_point<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     }
 }
 
+// cf. Documentation/filesystems/proc.txt
+#[derive(Debug)]
+pub struct MountInfo {
+    pub id: u64,
+    pub parent: Option<rc::Rc<MountInfo>>,
+    // major:minor
+    pub root: PathBuf,
+    pub mount_point: PathBuf,
+    pub options: Vec<String>,
+    // optional fields
+    pub fstype: String,
+    pub source: String,
+    // super options
+    //pub 
+}
+
+impl MountInfo {
+    pub fn is_root(&self) -> bool {
+        return self.mount_point==Path::new("/") && self.parent.is_none();
+    }
+}
+
+#[derive(Debug)]
+pub struct Mounts {
+    points: HashMap<PathBuf, rc::Rc<MountInfo>>,
+}
+
+impl Mounts {
+    pub fn current() -> Result<Mounts> {
+        Self::create(&"self")
+    }
+
+    pub fn from_pid(pid: libc::pid_t) -> Result<Mounts> {
+        Self::create(pid.to_string())
+    }
+
+    fn create<S: AsRef<str>>(pid: S) -> Result<Mounts> {
+        
+        let mut fname = PathBuf::from("/proc");
+        fname.push(pid.as_ref());
+        fname.push("mountinfo");
+
+        let contents = fs::read_to_string(&fname)
+            .map_err(|e| Error::file("open", &fname, e))?;
+        let lines : Vec<&str> = contents.lines().collect();
+
+        // lines like:
+        // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
+        // (0)(1)(2)   (3)   (4)      (5)      (6)   (7) (8)   (9)          (10)
+        
+        // order is not certain.  '/' may not be first entry
+        // so we pass ignore parents on first pass
+
+        let mut infos = HashMap::new();
+        let mut parents = HashMap::new();
+
+        for (lino, line) in lines.into_iter().enumerate() {
+            let parts : Vec<&str> = line.split(' ').collect();
+            if parts.len()<11 || &parts[7]!=&"-" {
+                return Err(Error::parse(format!("Syntax on Line {}", lino+1), &fname));
+            }
+            let id = parts[0].parse::<u64>()?;
+
+            parents.insert(id, parts[1].parse::<u64>()?);
+
+            infos.insert(id, rc::Rc::new(MountInfo {
+                id: id,
+                parent: None, // placeholder
+                root: parts[3].into(),
+                mount_point: parts[4].into(),
+                options: parts[5].split(',').map(|o| o.to_string()).collect(),
+                fstype: parts[8].to_string(),
+                source: parts[9].to_string(),
+            }));
+        }
+
+        for (id, mount) in infos.iter() {
+            unsafe {
+                // the tree is under our exclusive control while populating
+                let cheat = mount.as_ref() as *const MountInfo as *mut MountInfo;
+                (*cheat).parent = parents.get(id).and_then(|parid| infos.get(parid).map(|i| i.clone()));
+            }
+        }
+
+        Ok(Mounts {
+            points: infos.drain().map(|(_id, mount)| (mount.mount_point.clone(), mount)).collect(),
+        })
+    }
+
+    pub fn lookup<P: AsRef<Path>>(&self, path: P) -> Result<rc::Rc<MountInfo>> {
+        let mp = find_mount_point(path)?;
+        self.points.get(&mp)
+            .map(|info| info.clone())
+            .ok_or_else(|| Error::MissingMount{})
+    }
+}
+
+impl<'a> IntoIterator for &'a Mounts {
+    type Item = &'a rc::Rc<MountInfo>;
+    // oh for decltype()
+    type IntoIter = std::collections::hash_map::Values<'a, PathBuf, rc::Rc<MountInfo>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.points.values()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +168,17 @@ mod tests {
     fn test_empty() {
         let ret = find_mount_point(&"");
         assert!(ret.is_err(), "{:?}", ret);
+    }
+
+    #[test]
+    fn test_mountinfo() {
+        let infos = Mounts::current().unwrap();
+        let root = infos.lookup(&"/").unwrap();
+        assert!(root.parent.is_none(), "{:?}", infos);
+
+        for mp in &infos {
+            let noroot = mp.mount_point!=Path::new("/") || mp.parent.is_some();
+            assert!(mp.is_root() || noroot, "{:?} {} {}", mp, mp.is_root(), noroot);
+        }
     }
 }

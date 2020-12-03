@@ -118,6 +118,32 @@ pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::F
     }
 }
 
+pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
+    let rawname = CString::new(path.as_ref().to_string_lossy().as_ref())?;
+    unsafe {
+        let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
+        if ret==0 {
+            Ok(())
+        } else {
+            Err(Error::last_file_error("umount2", path))
+        }
+    }
+}
+
+pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> Result<()> {
+    let rawnew = CString::new(new_root.as_ref().to_string_lossy().as_ref())?;
+    let rawold = CString::new(old_root.as_ref().to_string_lossy().as_ref())?;
+    unsafe {
+        // no libc wrapper
+        let ret = libc::syscall(libc::SYS_pivot_root, rawnew, rawold);
+        if ret==0 {
+            Ok(())
+        } else {
+            Err(Error::last_file_error("pivot_root", new_root))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
