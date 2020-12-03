@@ -8,6 +8,7 @@ pub mod fs;
 pub mod net;
 mod proc;
 mod user;
+pub mod tempdir;
 
 pub mod container;
 pub use container::runc;

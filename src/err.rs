@@ -98,3 +98,9 @@ impl From<std::num::ParseIntError> for Error {
         Error::BadStr
     }
 }
+
+impl From<std::ffi::IntoStringError> for Error {
+    fn from(_inp: std::ffi::IntoStringError) -> Self {
+        Error::BadStr
+    }
+}
