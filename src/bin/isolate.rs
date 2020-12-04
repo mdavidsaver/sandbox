@@ -38,7 +38,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
     fn unshare(&self) -> Result<(), Error> {
         log::debug!("child unshare()");
         let mut flags =
-            libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWCGROUP | libc::CLONE_NEWNET;
+            libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWCGROUP | libc::CLONE_NEWIPC | libc::CLONE_NEWNET;
         if self.isuser {
             flags |= libc::CLONE_NEWUSER;
         }
@@ -65,21 +65,26 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("", "/", "", libc::MS_REC | libc::MS_PRIVATE)?;
 
         // make /proc for our new PID namespace available early
-        util::umount_lazy("/proc")?;
+        if !self.isuser {
+            // not strictly necessary, and not permitted from user namespace
+            util::umount_lazy("/proc")?;
+        }
         util::mount("proc", "/proc", "proc", NOOPT)?;
 
         let new_root = util::mkdir(path!(self.tdir, "root"))?;
         let new_tmp = path!(&new_root, "tmp");
         let new_proc = path!(&new_root, "proc");
+        let new_devshm = path!(&new_root, "dev", "shm");
 
         // mount --rbind / /tmp/.../root
         util::mount("/", &new_root, "", libc::MS_BIND | libc::MS_REC)?;
 
         //util::Exec::new("bash")?.exec()?;
 
-        // (maybe) disconnect some FS we definately won't use
+        // disconnect some FS we definately won't use (if they are mount points)
         util::maybe_umount_lazy(&new_tmp)?;
-        util::umount_lazy(&new_proc)?;
+        util::maybe_umount_lazy(&new_proc)?;
+        util::maybe_umount_lazy(&new_devshm)?;
 
         for mp in Mounts::current()?.into_iter() {
             if !mp.mount_point.starts_with(&new_root) {
@@ -88,7 +93,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
             log::debug!("Visit: {}", &mp);
 
             // black-list some fs-types
-            if ["cgroup", "cgroup2", "debugfs"].contains(&mp.fstype.as_str()) {
+            if !self.isuser && ["cgroup", "cgroup2", "debugfs"].contains(&mp.fstype.as_str()) {
                 log::debug!("Unmount: {}", mp.mount_point.display());
                 util::umount_lazy(&mp.mount_point)?;
             }
@@ -111,6 +116,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
         util::mount("none", &new_proc, "proc", NOOPT)?;
         util::mount("none", &new_tmp, "tmpfs", NOOPT)?;
+        util::mount("none", &new_devshm, "tmpfs", NOOPT)?;
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", NOOPT)?;
 
         // bind PWD R/W
