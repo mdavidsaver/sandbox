@@ -4,7 +4,7 @@ use std::{fmt, fs, rc};
 
 use std::os::unix::fs::MetadataExt;
 
-use log::debug;
+use log::warn;
 
 use super::err::{Error, Result};
 
@@ -166,7 +166,7 @@ impl Mounts {
                         "nodiratime" => options |= libc::MS_NODIRATIME,
                         "relatime" => options |= libc::MS_RELATIME,
                         "strictatime" => options |= libc::MS_STRICTATIME,
-                        _ => debug!("For {} ignore unknown option {}", parts[4], opt),
+                        _ => warn!("For {} ignore unknown option {}", parts[4], opt),
                     }
                 }
                 options

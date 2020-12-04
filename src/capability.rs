@@ -144,4 +144,9 @@ mod tests {
     fn get_current() {
         Cap::current().unwrap();
     }
+
+    #[test]
+    fn apply_current() {
+        Cap::current().unwrap().update().unwrap();
+    }
 }

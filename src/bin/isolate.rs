@@ -154,6 +154,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
         env::set_current_dir(&self.cwd)?;
 
         log::debug!("EXEC {:?}", &self.args[0..]);
+        env::set_var("VIRTUAL_ENV", "isolated");
 
         util::Exec::new(&self.args[0])?
             .args(&self.args[0..])?
