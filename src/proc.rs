@@ -75,6 +75,7 @@ impl Proc {
                 Err(err) => return Err(err),
                 Ok(TryWait::Busy) => (),
                 Ok(TryWait::Done(_child, sts)) => {
+                    debug!("park() -> {}", sts);
                     self.done = true;
                     self.code = sts;
                     return Ok(sts);

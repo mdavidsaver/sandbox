@@ -4,6 +4,8 @@ use std::{fmt, fs, rc};
 
 use std::os::unix::fs::MetadataExt;
 
+use log::debug;
+
 use super::err::{Error, Result};
 
 // like vec!() for a PathBuf
@@ -62,7 +64,7 @@ pub struct MountInfo {
     // major:minor
     pub root: PathBuf,
     pub mount_point: PathBuf,
-    pub options: Vec<String>,
+    pub options: u64,
     // optional fields
     pub fstype: String,
     pub source: String,
@@ -75,13 +77,8 @@ impl MountInfo {
         return self.mount_point == Path::new("/") && self.parent.is_none();
     }
 
-    pub fn has_option<S: AsRef<str>>(&self, opt: S) -> bool {
-        for has in &self.options {
-            if has == opt.as_ref() {
-                return true;
-            }
-        }
-        return false;
+    pub fn has_option(&self, opt: libc::c_ulong) -> bool {
+        0!=(self.options&opt)
     }
 }
 
@@ -155,6 +152,26 @@ impl Mounts {
 
             parents.insert(id, parts[1].parse::<u64>()?);
 
+            let options = {
+                let mut options = 0;
+                for opt in parts[5].split(',') {
+                    match opt {
+                    // cf. 'man 8 mount' and 'man 2 mount'
+                    "ro" => options |= libc::MS_RDONLY,
+                    "rw" => (),
+                    "noexec" => options |= libc::MS_NOEXEC,
+                    "nosuid" => options |= libc::MS_NOSUID,
+                    "nodev" => options |= libc::MS_NODEV,
+                    "noatime" => options |= libc::MS_NOATIME,
+                    "nodiratime" => options |= libc::MS_NODIRATIME,
+                    "relatime" => options |= libc::MS_RELATIME,
+                    "strictatime" => options |= libc::MS_STRICTATIME,
+                    _ =>  debug!("For {} ignore unknown option {}", parts[4], opt),
+                    }
+                }
+                options
+            };
+
             infos.insert(
                 id,
                 rc::Rc::new(MountInfo {
@@ -162,7 +179,7 @@ impl Mounts {
                     parent: None, // placeholder
                     root: parts[3].into(),
                     mount_point: parts[4].into(),
-                    options: parts[5].split(',').map(|o| o.to_string()).collect(),
+                    options: options,
                     fstype: parts[sepidx + 1].to_string(),
                     source: parts[sepidx + 2].to_string(),
                 }),

@@ -65,10 +65,6 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("", "/", "", libc::MS_REC | libc::MS_PRIVATE)?;
 
         // make /proc for our new PID namespace available early
-        if !self.isuser {
-            // not strictly necessary, and not permitted from user namespace
-            util::umount_lazy("/proc")?;
-        }
         util::mount("proc", "/proc", "proc", NOOPT)?;
 
         let new_root = util::mkdir(path!(self.tdir, "root"))?;
@@ -82,9 +78,10 @@ impl<'a> ContainerHooks for Isolate<'a> {
         //util::Exec::new("bash")?.exec()?;
 
         // disconnect some FS we definately won't use (if they are mount points)
-        util::maybe_umount_lazy(&new_tmp)?;
-        util::maybe_umount_lazy(&new_proc)?;
+        util::umount_lazy(&new_proc)?;
         util::maybe_umount_lazy(&new_devshm)?;
+        util::maybe_umount_lazy(&new_tmp)?;
+        util::maybe_umount_lazy(path!(&new_root, "var", "tmp"))?;
 
         for mp in Mounts::current()?.into_iter() {
             if !mp.mount_point.starts_with(&new_root) {
@@ -98,19 +95,23 @@ impl<'a> ContainerHooks for Isolate<'a> {
                 util::umount_lazy(&mp.mount_point)?;
             }
 
-            if mp.has_option("ro") {
+            if mp.has_option(libc::MS_RDONLY) {
                 continue;
             }
 
             // try to remount phyisical and various tmpfs-like as read-only
             if mp.source.starts_with("/dev/") || ["tmpfs", "ramfs"].contains(&mp.fstype.as_str()) {
                 log::debug!("Make RO: {}", mp.mount_point.display());
-                util::mount(
+                match util::mount(
                     "",
                     &mp.mount_point,
                     "",
-                    libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
-                )?;
+                    mp.options | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
+                ) {
+                // this mount point may not be accessible to a non-privlaged user.  eg. under /root
+                Err(err) if self.isuser && err.is_io_error(std::io::ErrorKind::PermissionDenied) => Ok(()),
+                other => other,
+                }?;
             }
         }
 
@@ -123,6 +124,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount(&self.cwd, path!(&new_root, self.cwd.strip_prefix("/").unwrap()), "", libc::MS_BIND)?;
 
         util::mkdir(path!(&new_tmp, "oldroot"))?;
+
+        util::umount_lazy("/proc")?; // mounted above, no longer needed
 
         env::set_current_dir(&new_root)?;
         util::pivot_root(".", "tmp/oldroot")?;
@@ -160,7 +163,5 @@ fn main() -> Result<(), Error> {
     let tdir = TempDir::new().unwrap();
     util::chown(tdir.path(), util::getuid(), util::getgid())?;
 
-    runc(&Isolate::new(tdir.path(), &rawargs[1..])?)?;
-
-    Ok(())
+    process::exit(runc(&Isolate::new(tdir.path(), &rawargs[1..])?)?);
 }

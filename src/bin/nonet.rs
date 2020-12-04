@@ -46,9 +46,7 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    runc(&NoNet {
+    process::exit(runc(&NoNet {
         args: rawargs[1..].to_vec(),
-    })?;
-
-    Ok(())
+    })?);
 }

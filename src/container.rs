@@ -127,7 +127,7 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
         Fork::Child => match handle_grandchild(hooks) {
             Ok(()) => exit(0),
             Err(err) => {
-                eprintln!("Child error: {}", err);
+                eprintln!("Grandchild error: {}", err);
                 exit(1)
             }
         },

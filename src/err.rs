@@ -58,6 +58,14 @@ impl Error {
             name: path.as_ref().to_path_buf(),
         }
     }
+
+    pub fn is_io_error(&self, kind: io::ErrorKind) -> bool {
+        match self {
+            Self::File { io, .. } => io.kind()==kind,
+            Self::OS { io, .. } => io.kind()==kind,
+            _ => return false,
+        }
+    }
 }
 
 impl error::Error for Error {

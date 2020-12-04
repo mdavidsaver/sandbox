@@ -143,7 +143,5 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    runc(&HideHome::new(&rawargs[1..])?)?;
-
-    Ok(())
+    process::exit(runc(&HideHome::new(&rawargs[1..])?)?);
 }
