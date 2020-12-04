@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use std::os::unix::io::FromRawFd;
 
@@ -16,8 +16,13 @@ use super::err::{Error, Result};
 pub use super::proc::*;
 pub use super::user::*;
 
+fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
+    let ret = CString::new(path.as_ref().to_string_lossy().as_ref())?;
+    Ok(ret)
+}
+
 pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<()> {
-    debug!("write_file({}, ...)", name.as_ref().display());
+    debug!("write_file({:?}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -27,9 +32,21 @@ pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<()> {
         .map_err(|e| Error::file("write", name.as_ref(), e))
 }
 
-pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<()> {
-    debug!("mkdirs({})", name.as_ref().display());
-    fs::create_dir_all(name.as_ref()).map_err(|e| Error::file("mkdirs", name.as_ref(), e))
+pub fn mkdir<S: AsRef<Path>>(name: S) -> Result<PathBuf> {
+    debug!("mkdir({:?})", name.as_ref().display());
+    fs::create_dir(name.as_ref()).map_err(|e| Error::file("mkdir", name.as_ref(), e))?;
+    Ok(name.as_ref().to_path_buf())
+}
+
+pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<PathBuf> {
+    debug!("mkdirs({:?})", name.as_ref().display());
+    fs::create_dir_all(name.as_ref()).map_err(|e| Error::file("mkdirs", name.as_ref(), e))?;
+    Ok(name.as_ref().to_path_buf())
+}
+
+pub fn rmdir<S: AsRef<Path>>(name: S) -> Result<()> {
+    debug!("rmdir({:?})", name.as_ref().display());
+    fs::remove_dir(name.as_ref()).map_err(|e| Error::file("rmdir", name.as_ref(), e))
 }
 
 pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
@@ -77,10 +94,10 @@ where
     C: AsRef<Path>,
     D: AsRef<Path>,
 {
-    let csrc = CString::new(src.as_ref().to_string_lossy().as_ref())?;
-    let ctarget = CString::new(target.as_ref().to_string_lossy().as_ref())?;
-    let cfstype = CString::new(fstype.as_ref().to_string_lossy().as_ref())?;
-    let cdata = CString::new(data.as_ref().to_string_lossy().as_ref())?;
+    let csrc = path2cstr(&src)?;
+    let ctarget = path2cstr(&target)?;
+    let cfstype = path2cstr(&fstype)?;
+    let cdata = path2cstr(&data)?;
     debug!(
         "mount({:?},{:?},{:?},0x{:x},{:?})",
         csrc, ctarget, cfstype, flags, cdata
@@ -106,7 +123,7 @@ where
 }
 
 pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::File> {
-    let rawname = CString::new(fname.as_ref().to_string_lossy().as_ref())?;
+    let rawname = path2cstr(&fname)?;
     let fd;
     unsafe {
         fd = libc::creat(rawname.as_ptr(), perm);
@@ -119,7 +136,8 @@ pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::F
 }
 
 pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
-    let rawname = CString::new(path.as_ref().to_string_lossy().as_ref())?;
+    debug!("umount({:?})", path.as_ref().display());
+    let rawname = path2cstr(&path)?;
     unsafe {
         let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
         if ret==0 {
@@ -130,12 +148,32 @@ pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     }
 }
 
+pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
+    debug!("umount({:?})", path.as_ref().display());
+    let rawname = path2cstr(&path)?;
+    unsafe {
+        let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
+        if ret==0 {
+            debug!("  Success");
+            Ok(true)
+        } else if std::io::Error::last_os_error().raw_os_error().unwrap()==libc::EINVAL {
+            debug!("  Nope");
+            Ok(false)
+        } else {
+            Err(Error::last_file_error("umount2", path))
+        }
+    }
+}
+
 pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> Result<()> {
-    let rawnew = CString::new(new_root.as_ref().to_string_lossy().as_ref())?;
-    let rawold = CString::new(old_root.as_ref().to_string_lossy().as_ref())?;
+    debug!("pivot_root({:?}, {:?})", new_root.as_ref().display(), old_root.as_ref().display());
+    let rawnew = path2cstr(&new_root)?;
+    let rawold = path2cstr(&old_root)?;
     unsafe {
         // no libc wrapper
-        let ret = libc::syscall(libc::SYS_pivot_root, rawnew, rawold);
+        let ret = libc::syscall(libc::SYS_pivot_root,
+            rawnew.as_ptr() as *const libc::c_char,
+            rawold.as_ptr() as *const libc::c_char);
         if ret==0 {
             Ok(())
         } else {

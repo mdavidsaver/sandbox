@@ -1,10 +1,24 @@
-use std::{fs, rc};
+use std::{fmt, fs, rc};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
 use std::os::unix::fs::MetadataExt;
 
 use super::err::{Error, Result};
+
+// like vec!() for a PathBuf
+#[macro_export]
+macro_rules! path {
+    ($root:expr, $( $piece:expr ),*) => {
+        {
+            let mut temp = PathBuf::from($root);
+            $(
+                temp.push($piece);
+            )*
+            temp
+        }
+    }
+}
 
 /// Find the (parent) directory which is a mount point for this file/directory.
 ///
@@ -60,6 +74,25 @@ impl MountInfo {
     pub fn is_root(&self) -> bool {
         return self.mount_point==Path::new("/") && self.parent.is_none();
     }
+
+    pub fn has_option<S: AsRef<str>>(&self, opt: S) -> bool {
+        for has in &self.options {
+            if has==opt.as_ref() {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+impl fmt::Display for MountInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "mount={} parent={} fstype={} source={}",
+            self.mount_point.display(),
+            self.parent.as_ref().map_or(&self.mount_point.clone(), |p| &p.mount_point).display(),
+            self.fstype,
+            self.source)
+    }
 }
 
 #[derive(Debug)]
@@ -84,11 +117,13 @@ impl Mounts {
 
         let contents = fs::read_to_string(&fname)
             .map_err(|e| Error::file("open", &fname, e))?;
+
         let lines : Vec<&str> = contents.lines().collect();
 
         // lines like:
         // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
         // (0)(1)(2)   (3)   (4)      (5)      (6)   (7) (8)   (9)          (10)
+        // where (6) may be repeated zero or more times.
         
         // order is not certain.  '/' may not be first entry
         // so we pass ignore parents on first pass
@@ -98,9 +133,14 @@ impl Mounts {
 
         for (lino, line) in lines.into_iter().enumerate() {
             let parts : Vec<&str> = line.split(' ').collect();
-            if parts.len()<11 || &parts[7]!=&"-" {
-                return Err(Error::parse(format!("Syntax on Line {}", lino+1), &fname));
+            if parts.len()<10 {
+                return Err(Error::parse(format!("Syntax on Line {} : \"{}\"", lino+1, &line), &fname));
             }
+
+            // find index of '-'
+            let (sepidx, _) = parts.iter().enumerate().find(|(_,e)| &&"-"==e)
+                .ok_or_else(|| Error::parse(format!("Missing sep in \"{}\"", &line), &fname))?;
+
             let id = parts[0].parse::<u64>()?;
 
             parents.insert(id, parts[1].parse::<u64>()?);
@@ -111,8 +151,8 @@ impl Mounts {
                 root: parts[3].into(),
                 mount_point: parts[4].into(),
                 options: parts[5].split(',').map(|o| o.to_string()).collect(),
-                fstype: parts[8].to_string(),
-                source: parts[9].to_string(),
+                fstype: parts[sepidx+1].to_string(),
+                source: parts[sepidx+2].to_string(),
             }));
         }
 
