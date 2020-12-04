@@ -187,12 +187,13 @@ impl Mounts {
         }
 
         for (id, mount) in infos.iter() {
+            let parent = parents
+                    .get(id)
+                    .and_then(|parid| infos.get(parid).map(|i| i.clone()));
             unsafe {
                 // the tree is under our exclusive control while populating
                 let cheat = mount.as_ref() as *const MountInfo as *mut MountInfo;
-                (*cheat).parent = parents
-                    .get(id)
-                    .and_then(|parid| infos.get(parid).map(|i| i.clone()));
+                (*cheat).parent = parent;
             }
         }
 
