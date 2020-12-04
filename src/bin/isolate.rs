@@ -113,6 +113,9 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("none", &new_tmp, "tmpfs", NOOPT)?;
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", NOOPT)?;
 
+        // bind PWD R/W
+        util::mount(&self.cwd, path!(&new_root, self.cwd.strip_prefix("/").unwrap()), "", libc::MS_BIND)?;
+
         util::mkdir(path!(&new_tmp, "oldroot"))?;
 
         env::set_current_dir(&new_root)?;
@@ -149,6 +152,7 @@ fn main() -> Result<(), Error> {
     }
 
     let tdir = TempDir::new().unwrap();
+    util::chown(tdir.path(), util::getuid(), util::getgid())?;
 
     runc(&Isolate::new(tdir.path(), &rawargs[1..])?)?;
 

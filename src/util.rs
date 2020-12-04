@@ -49,6 +49,19 @@ pub fn rmdir<S: AsRef<Path>>(name: S) -> Result<()> {
     fs::remove_dir(name.as_ref()).map_err(|e| Error::file("rmdir", name.as_ref(), e))
 }
 
+pub fn chown<S: AsRef<Path>>(path: S, uid: libc::uid_t, gid: libc::gid_t) -> Result<()> {
+    debug!("chown({:?}, {:?}, {:?})", path.as_ref().display(), uid, gid);
+    let rawname = path2cstr(&path)?;
+    unsafe {
+        let ret = libc::chown(rawname.as_ptr(), uid, gid);
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(Error::last_file_error("chown", path))
+        }
+    }
+}
+
 pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
     let mut fds = vec![0, 2];
     unsafe {
