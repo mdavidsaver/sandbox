@@ -81,7 +81,9 @@ impl fmt::Display for Error {
             Self::NotIPv4 => write!(f, "Interface address not IPv4"),
             Self::BadStr => write!(f, "String can not contain nil"),
             Self::UIDMap => write!(f, "newuidmap"),
-            Self::ParseError { msg, name } => write!(f, "Error: {} while parsing {}", msg, name.display()),
+            Self::ParseError { msg, name } => {
+                write!(f, "Error: {} while parsing {}", msg, name.display())
+            }
             Self::MissingMount => write!(f, "Missing mount point info"),
         }
     }

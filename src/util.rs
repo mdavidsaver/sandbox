@@ -140,7 +140,7 @@ pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     let rawname = path2cstr(&path)?;
     unsafe {
         let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
-        if ret==0 {
+        if ret == 0 {
             Ok(())
         } else {
             Err(Error::last_file_error("umount2", path))
@@ -153,10 +153,10 @@ pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
     let rawname = path2cstr(&path)?;
     unsafe {
         let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
-        if ret==0 {
+        if ret == 0 {
             debug!("  Success");
             Ok(true)
-        } else if std::io::Error::last_os_error().raw_os_error().unwrap()==libc::EINVAL {
+        } else if std::io::Error::last_os_error().raw_os_error().unwrap() == libc::EINVAL {
             debug!("  Nope");
             Ok(false)
         } else {
@@ -166,15 +166,21 @@ pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
 }
 
 pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> Result<()> {
-    debug!("pivot_root({:?}, {:?})", new_root.as_ref().display(), old_root.as_ref().display());
+    debug!(
+        "pivot_root({:?}, {:?})",
+        new_root.as_ref().display(),
+        old_root.as_ref().display()
+    );
     let rawnew = path2cstr(&new_root)?;
     let rawold = path2cstr(&old_root)?;
     unsafe {
         // no libc wrapper
-        let ret = libc::syscall(libc::SYS_pivot_root,
+        let ret = libc::syscall(
+            libc::SYS_pivot_root,
             rawnew.as_ptr() as *const libc::c_char,
-            rawold.as_ptr() as *const libc::c_char);
-        if ret==0 {
+            rawold.as_ptr() as *const libc::c_char,
+        );
+        if ret == 0 {
             Ok(())
         } else {
             Err(Error::last_file_error("pivot_root", new_root))

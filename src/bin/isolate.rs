@@ -4,14 +4,14 @@ use std::{env, process};
 use log;
 
 use sandbox::container::{ContainerHooks, IdMap, Proc};
-use sandbox::{net, util};
-use sandbox::{runc, Error};
-use sandbox::tempdir::TempDir;
 use sandbox::fs::Mounts;
 use sandbox::path;
+use sandbox::tempdir::TempDir;
+use sandbox::{net, util};
+use sandbox::{runc, Error};
 
-const NOOPT : libc::c_ulong = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
-        
+const NOOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
+
 struct Isolate<'a> {
     isuser: bool,
     args: Vec<String>,
@@ -73,7 +73,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
         let new_proc = path!(&new_root, "proc");
 
         // mount --rbind / /tmp/.../root
-        util::mount("/", &new_root, "", libc::MS_BIND|libc::MS_REC)?;
+        util::mount("/", &new_root, "", libc::MS_BIND | libc::MS_REC)?;
 
         //util::Exec::new("bash")?.exec()?;
 
@@ -100,7 +100,12 @@ impl<'a> ContainerHooks for Isolate<'a> {
             // try to remount phyisical and various tmpfs-like as read-only
             if mp.source.starts_with("/dev/") || ["tmpfs", "ramfs"].contains(&mp.fstype.as_str()) {
                 log::debug!("Make RO: {}", mp.mount_point.display());
-                util::mount("", &mp.mount_point, "", libc::MS_REMOUNT|libc::MS_RDONLY|libc::MS_BIND)?;
+                util::mount(
+                    "",
+                    &mp.mount_point,
+                    "",
+                    libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
+                )?;
             }
         }
 

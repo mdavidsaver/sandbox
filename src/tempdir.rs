@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
 use libc;
+use std::path::{Path, PathBuf};
 
-use log::{error};
+use log::error;
 
 use super::err::{Error, Result};
 use super::path;
@@ -35,7 +35,11 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         if let Err(err) = std::fs::remove_dir_all(&self.name) {
-            error!("Unable to remove temporary directory: {} : {}", self.name.display(), err);
+            error!(
+                "Unable to remove temporary directory: {} : {}",
+                self.name.display(),
+                err
+            );
         }
     }
 }
@@ -47,6 +51,10 @@ mod tests {
     #[test]
     fn test_tempdir() {
         let tdir = TempDir::new().unwrap();
-        assert!(std::fs::metadata(tdir.path()).unwrap().is_dir(), "{:?}", tdir);
+        assert!(
+            std::fs::metadata(tdir.path()).unwrap().is_dir(),
+            "{:?}",
+            tdir
+        );
     }
 }

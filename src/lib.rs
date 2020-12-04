@@ -7,8 +7,8 @@ mod capability;
 pub mod fs;
 pub mod net;
 mod proc;
-mod user;
 pub mod tempdir;
+mod user;
 
 pub mod container;
 pub use container::runc;

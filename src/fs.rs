@@ -1,6 +1,6 @@
-use std::{fmt, fs, rc};
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::{fmt, fs, rc};
 
 use std::os::unix::fs::MetadataExt;
 
@@ -67,17 +67,17 @@ pub struct MountInfo {
     pub fstype: String,
     pub source: String,
     // super options
-    //pub 
+    //pub
 }
 
 impl MountInfo {
     pub fn is_root(&self) -> bool {
-        return self.mount_point==Path::new("/") && self.parent.is_none();
+        return self.mount_point == Path::new("/") && self.parent.is_none();
     }
 
     pub fn has_option<S: AsRef<str>>(&self, opt: S) -> bool {
         for has in &self.options {
-            if has==opt.as_ref() {
+            if has == opt.as_ref() {
                 return true;
             }
         }
@@ -87,11 +87,17 @@ impl MountInfo {
 
 impl fmt::Display for MountInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "mount={} parent={} fstype={} source={}",
+        write!(
+            f,
+            "mount={} parent={} fstype={} source={}",
             self.mount_point.display(),
-            self.parent.as_ref().map_or(&self.mount_point.clone(), |p| &p.mount_point).display(),
+            self.parent
+                .as_ref()
+                .map_or(&self.mount_point.clone(), |p| &p.mount_point)
+                .display(),
             self.fstype,
-            self.source)
+            self.source
+        )
     }
 }
 
@@ -110,21 +116,19 @@ impl Mounts {
     }
 
     fn create<S: AsRef<str>>(pid: S) -> Result<Mounts> {
-        
         let mut fname = PathBuf::from("/proc");
         fname.push(pid.as_ref());
         fname.push("mountinfo");
 
-        let contents = fs::read_to_string(&fname)
-            .map_err(|e| Error::file("open", &fname, e))?;
+        let contents = fs::read_to_string(&fname).map_err(|e| Error::file("open", &fname, e))?;
 
-        let lines : Vec<&str> = contents.lines().collect();
+        let lines: Vec<&str> = contents.lines().collect();
 
         // lines like:
         // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
         // (0)(1)(2)   (3)   (4)      (5)      (6)   (7) (8)   (9)          (10)
         // where (6) may be repeated zero or more times.
-        
+
         // order is not certain.  '/' may not be first entry
         // so we pass ignore parents on first pass
 
@@ -132,48 +136,63 @@ impl Mounts {
         let mut parents = HashMap::new();
 
         for (lino, line) in lines.into_iter().enumerate() {
-            let parts : Vec<&str> = line.split(' ').collect();
-            if parts.len()<10 {
-                return Err(Error::parse(format!("Syntax on Line {} : \"{}\"", lino+1, &line), &fname));
+            let parts: Vec<&str> = line.split(' ').collect();
+            if parts.len() < 10 {
+                return Err(Error::parse(
+                    format!("Syntax on Line {} : \"{}\"", lino + 1, &line),
+                    &fname,
+                ));
             }
 
             // find index of '-'
-            let (sepidx, _) = parts.iter().enumerate().find(|(_,e)| &&"-"==e)
+            let (sepidx, _) = parts
+                .iter()
+                .enumerate()
+                .find(|(_, e)| &&"-" == e)
                 .ok_or_else(|| Error::parse(format!("Missing sep in \"{}\"", &line), &fname))?;
 
             let id = parts[0].parse::<u64>()?;
 
             parents.insert(id, parts[1].parse::<u64>()?);
 
-            infos.insert(id, rc::Rc::new(MountInfo {
-                id: id,
-                parent: None, // placeholder
-                root: parts[3].into(),
-                mount_point: parts[4].into(),
-                options: parts[5].split(',').map(|o| o.to_string()).collect(),
-                fstype: parts[sepidx+1].to_string(),
-                source: parts[sepidx+2].to_string(),
-            }));
+            infos.insert(
+                id,
+                rc::Rc::new(MountInfo {
+                    id: id,
+                    parent: None, // placeholder
+                    root: parts[3].into(),
+                    mount_point: parts[4].into(),
+                    options: parts[5].split(',').map(|o| o.to_string()).collect(),
+                    fstype: parts[sepidx + 1].to_string(),
+                    source: parts[sepidx + 2].to_string(),
+                }),
+            );
         }
 
         for (id, mount) in infos.iter() {
             unsafe {
                 // the tree is under our exclusive control while populating
                 let cheat = mount.as_ref() as *const MountInfo as *mut MountInfo;
-                (*cheat).parent = parents.get(id).and_then(|parid| infos.get(parid).map(|i| i.clone()));
+                (*cheat).parent = parents
+                    .get(id)
+                    .and_then(|parid| infos.get(parid).map(|i| i.clone()));
             }
         }
 
         Ok(Mounts {
-            points: infos.drain().map(|(_id, mount)| (mount.mount_point.clone(), mount)).collect(),
+            points: infos
+                .drain()
+                .map(|(_id, mount)| (mount.mount_point.clone(), mount))
+                .collect(),
         })
     }
 
     pub fn lookup<P: AsRef<Path>>(&self, path: P) -> Result<rc::Rc<MountInfo>> {
         let mp = find_mount_point(path)?;
-        self.points.get(&mp)
+        self.points
+            .get(&mp)
             .map(|info| info.clone())
-            .ok_or_else(|| Error::MissingMount{})
+            .ok_or_else(|| Error::MissingMount {})
     }
 }
 
@@ -217,8 +236,14 @@ mod tests {
         assert!(root.parent.is_none(), "{:?}", infos);
 
         for mp in &infos {
-            let noroot = mp.mount_point!=Path::new("/") || mp.parent.is_some();
-            assert!(mp.is_root() || noroot, "{:?} {} {}", mp, mp.is_root(), noroot);
+            let noroot = mp.mount_point != Path::new("/") || mp.parent.is_some();
+            assert!(
+                mp.is_root() || noroot,
+                "{:?} {} {}",
+                mp,
+                mp.is_root(),
+                noroot
+            );
         }
     }
 }
