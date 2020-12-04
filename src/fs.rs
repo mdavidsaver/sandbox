@@ -78,7 +78,7 @@ impl MountInfo {
     }
 
     pub fn has_option(&self, opt: libc::c_ulong) -> bool {
-        0!=(self.options&opt)
+        0 != (self.options & opt)
     }
 }
 
@@ -156,17 +156,17 @@ impl Mounts {
                 let mut options = 0;
                 for opt in parts[5].split(',') {
                     match opt {
-                    // cf. 'man 8 mount' and 'man 2 mount'
-                    "ro" => options |= libc::MS_RDONLY,
-                    "rw" => (),
-                    "noexec" => options |= libc::MS_NOEXEC,
-                    "nosuid" => options |= libc::MS_NOSUID,
-                    "nodev" => options |= libc::MS_NODEV,
-                    "noatime" => options |= libc::MS_NOATIME,
-                    "nodiratime" => options |= libc::MS_NODIRATIME,
-                    "relatime" => options |= libc::MS_RELATIME,
-                    "strictatime" => options |= libc::MS_STRICTATIME,
-                    _ =>  debug!("For {} ignore unknown option {}", parts[4], opt),
+                        // cf. 'man 8 mount' and 'man 2 mount'
+                        "ro" => options |= libc::MS_RDONLY,
+                        "rw" => (),
+                        "noexec" => options |= libc::MS_NOEXEC,
+                        "nosuid" => options |= libc::MS_NOSUID,
+                        "nodev" => options |= libc::MS_NODEV,
+                        "noatime" => options |= libc::MS_NOATIME,
+                        "nodiratime" => options |= libc::MS_NODIRATIME,
+                        "relatime" => options |= libc::MS_RELATIME,
+                        "strictatime" => options |= libc::MS_STRICTATIME,
+                        _ => debug!("For {} ignore unknown option {}", parts[4], opt),
                     }
                 }
                 options

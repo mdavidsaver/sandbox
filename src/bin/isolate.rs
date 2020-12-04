@@ -37,8 +37,11 @@ impl<'a> Isolate<'a> {
 impl<'a> ContainerHooks for Isolate<'a> {
     fn unshare(&self) -> Result<(), Error> {
         log::debug!("child unshare()");
-        let mut flags =
-            libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWCGROUP | libc::CLONE_NEWIPC | libc::CLONE_NEWNET;
+        let mut flags = libc::CLONE_NEWNS
+            | libc::CLONE_NEWPID
+            | libc::CLONE_NEWCGROUP
+            | libc::CLONE_NEWIPC
+            | libc::CLONE_NEWNET;
         if self.isuser {
             flags |= libc::CLONE_NEWUSER;
         }
@@ -108,9 +111,13 @@ impl<'a> ContainerHooks for Isolate<'a> {
                     "",
                     mp.options | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
                 ) {
-                // this mount point may not be accessible to a non-privlaged user.  eg. under /root
-                Err(err) if self.isuser && err.is_io_error(std::io::ErrorKind::PermissionDenied) => Ok(()),
-                other => other,
+                    // this mount point may not be accessible to a non-privlaged user.  eg. under /root
+                    Err(err)
+                        if self.isuser && err.is_io_error(std::io::ErrorKind::PermissionDenied) =>
+                    {
+                        Ok(())
+                    }
+                    other => other,
                 }?;
             }
         }
@@ -121,7 +128,12 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", NOOPT)?;
 
         // bind PWD R/W
-        util::mount(&self.cwd, path!(&new_root, self.cwd.strip_prefix("/").unwrap()), "", libc::MS_BIND)?;
+        util::mount(
+            &self.cwd,
+            path!(&new_root, self.cwd.strip_prefix("/").unwrap()),
+            "",
+            libc::MS_BIND,
+        )?;
 
         util::mkdir(path!(&new_tmp, "oldroot"))?;
 
