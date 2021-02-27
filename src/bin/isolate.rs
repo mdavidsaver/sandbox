@@ -14,34 +14,21 @@ const NOOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID 
 
 struct Isolate<'a> {
     isuser: bool,
+    allownet: bool,
     args: Vec<String>,
     tdir: &'a Path,
+    writable: Vec<PathBuf>,
     cwd: PathBuf,
-}
-
-impl<'a> Isolate<'a> {
-    pub fn new<I>(tdir: &'a Path, args: I) -> Result<Self, Error>
-    where
-        I: IntoIterator,
-        I::Item: Into<String>,
-    {
-        Ok(Self {
-            isuser: !util::Cap::current()?.effective(util::CAP_SYS_ADMIN),
-            args: args.into_iter().map(|e| e.into()).collect(),
-            tdir: tdir,
-            cwd: env::current_dir()?,
-        })
-    }
 }
 
 impl<'a> ContainerHooks for Isolate<'a> {
     fn unshare(&self) -> Result<(), Error> {
         log::debug!("child unshare()");
-        let mut flags = libc::CLONE_NEWNS
-            | libc::CLONE_NEWPID
-            | libc::CLONE_NEWCGROUP
-            | libc::CLONE_NEWIPC
-            | libc::CLONE_NEWNET;
+        let mut flags =
+            libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWCGROUP | libc::CLONE_NEWIPC;
+        if !self.allownet {
+            flags |= libc::CLONE_NEWNET;
+        }
         if self.isuser {
             flags |= libc::CLONE_NEWUSER;
         }
@@ -62,7 +49,9 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 
     fn setup_priv(&self) -> Result<(), Error> {
-        net::configure_lo()?;
+        if !self.allownet {
+            net::configure_lo()?;
+        }
 
         // begin by isolating our new mount ns
         util::mount("", "/", "", libc::MS_REC | libc::MS_PRIVATE)?;
@@ -127,13 +116,16 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("none", &new_devshm, "tmpfs", NOOPT)?;
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", NOOPT)?;
 
-        // bind PWD R/W
-        util::mount(
-            &self.cwd,
-            path!(&new_root, self.cwd.strip_prefix("/").unwrap()),
-            "",
-            libc::MS_BIND,
-        )?;
+        // bind writable
+        for wdir in &self.writable {
+            log::debug!("Make RW: {}", wdir.display());
+            util::mount(
+                &wdir,
+                path!(&new_root, wdir.strip_prefix("/").unwrap()),
+                "",
+                libc::MS_BIND,
+            )?;
+        }
 
         util::mkdir(path!(&new_tmp, "oldroot"))?;
 
@@ -151,6 +143,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 
     fn setup(&self) -> Result<(), Error> {
+        util::mkdirs(&self.cwd)?; // in case under /tmp
         env::set_current_dir(&self.cwd)?;
 
         log::debug!("EXEC {:?}", &self.args[0..]);
@@ -164,17 +157,63 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 }
 
+fn usage() {
+    let execname = env::args().next().unwrap();
+    eprintln!(
+        "Usage: {} [-n|--net] [-W|--rw <dir>] <cmd> [args ...]",
+        execname
+    );
+}
+
 fn main() -> Result<(), Error> {
     env_logger::init();
+    let cwd = env::current_dir()?.canonicalize()?;
+    if !cwd.is_absolute() {
+        eprintln!("curdir is not absolute?!?");
+        process::exit(2);
+    }
 
-    let rawargs = env::args().collect::<Vec<String>>();
-    if rawargs.len() <= 1 {
-        eprintln!("Usage: {} <cmd> [args ...]", rawargs[0]);
+    let mut rawargs = env::args().skip(1).collect::<Vec<String>>();
+    let mut allownet = false;
+    let mut writable = vec![cwd.clone()];
+    let mut add_writable = |path: &PathBuf| -> Result<(), Error> {
+        writable.push((&cwd).join(path).canonicalize()?);
+        Ok(())
+    };
+
+    while !rawargs.is_empty() {
+        if !rawargs[0].starts_with("-") {
+            break;
+        } else if rawargs[0] == "-n" || rawargs[0] == "--net" {
+            allownet = true;
+        } else if rawargs[0] == "-W" || rawargs[0] == "--rw" {
+            add_writable(&PathBuf::from(
+                rawargs.get(1).expect("-W/--rw expects argument"),
+            ))?;
+            rawargs.remove(0);
+        } else {
+            usage();
+            eprintln!("Unknown argument: {}", rawargs[0]);
+            process::exit(1);
+        }
+        rawargs.remove(0);
+    }
+    if rawargs.len() == 0 {
+        usage();
         process::exit(1);
     }
 
     let tdir = TempDir::new().unwrap();
     util::chown(tdir.path(), util::getuid(), util::getgid())?;
 
-    process::exit(runc(&Isolate::new(tdir.path(), &rawargs[1..])?)?);
+    let cont = Isolate {
+        isuser: !util::Cap::current()?.effective(util::CAP_SYS_ADMIN),
+        allownet: allownet,
+        args: rawargs,
+        tdir: tdir.path(),
+        writable: writable,
+        cwd: env::current_dir()?,
+    };
+
+    process::exit(runc(&cont)?);
 }
