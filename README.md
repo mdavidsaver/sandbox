@@ -28,3 +28,9 @@ May be installed with SUID set, or with non-privlaged user namespaces enabled.
 Run a command with no network access.  Only a loopback interface.
 
 Should be installed with SUID set.
+
+## Debug
+
+```
+export RUST_LOG=debug
+```
