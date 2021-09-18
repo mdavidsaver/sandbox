@@ -21,6 +21,47 @@ fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
     Ok(ret)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum FileType {
+    File,
+    Dir,
+    Other(libc::c_int),
+}
+
+pub struct Stat(libc::stat);
+
+impl Stat {
+    fn file_type(&self) -> FileType {
+        let ftype = self.0.st_mode & libc::S_IFMT;
+        match ftype {
+            libc::S_IFREG => FileType::File,
+            libc::S_IFDIR => FileType::Dir,
+            _ => FileType::Other(ftype as libc::c_int),
+        }
+    }
+    fn perm(&self) -> u32 {
+        self.0.st_mode & 0o7777
+    }
+    fn uid(&self) -> libc::uid_t {
+        self.0.st_uid
+    }
+    fn gid(&self) -> libc::gid_t {
+        self.0.st_gid
+    }
+}
+
+pub fn stat<P: AsRef<Path>>(name: P) -> Result<Stat> {
+    let rawname = path2cstr(&name)?;
+    unsafe {
+        let mut ret: libc::stat = std::mem::zeroed();
+        if libc::stat(rawname.as_ptr(), &mut ret) == 0 {
+            Ok(Stat(ret))
+        } else {
+            Err(Error::last_file_error("stat", name))
+        }
+    }
+}
+
 pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<()> {
     debug!("write_file({:?}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()
@@ -44,6 +85,27 @@ pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<PathBuf> {
     Ok(name.as_ref().to_path_buf())
 }
 
+/// Create directory /B/A with same ownership and permissions as /A
+pub fn clonedirs<A: AsRef<Path>, B: AsRef<Path>>(src: A, target: B) -> Result<()> {
+    assert!(src.as_ref().is_absolute(), "{:?}", src.as_ref());
+    assert!(target.as_ref().is_absolute(), "{:?}", target.as_ref());
+    // iterate from root to leaf
+    for sdir in src.as_ref().ancestors().collect::<Vec<_>>().iter().rev() {
+        let tg = target.as_ref().join(sdir.strip_prefix("/").unwrap());
+        if !tg.exists() {
+            debug!("clone path {}", tg.display());
+            let st = stat(sdir)?;
+            match st.file_type() {
+                FileType::Dir => drop(mkdir(&tg)?),
+                _ => fs::write(&tg, b"").map_err(|e| Error::file("write", &tg, e))?,
+            }
+            chmod(&tg, st.perm())?;
+            chown(&tg, st.uid(), st.gid())?;
+        }
+    }
+    Ok(())
+}
+
 pub fn rmdir<S: AsRef<Path>>(name: S) -> Result<()> {
     debug!("rmdir({:?})", name.as_ref().display());
     fs::remove_dir(name.as_ref()).map_err(|e| Error::file("rmdir", name.as_ref(), e))
@@ -53,11 +115,22 @@ pub fn chown<S: AsRef<Path>>(path: S, uid: libc::uid_t, gid: libc::gid_t) -> Res
     debug!("chown({:?}, {:?}, {:?})", path.as_ref().display(), uid, gid);
     let rawname = path2cstr(&path)?;
     unsafe {
-        let ret = libc::chown(rawname.as_ptr(), uid, gid);
-        if ret == 0 {
+        if libc::chown(rawname.as_ptr(), uid, gid) == 0 {
             Ok(())
         } else {
             Err(Error::last_file_error("chown", path))
+        }
+    }
+}
+
+pub fn chmod<S: AsRef<Path>>(path: S, mode: u32) -> Result<()> {
+    debug!("chmod({:?}, {:?})", path.as_ref().display(), mode);
+    let rawname = path2cstr(&path)?;
+    unsafe {
+        if libc::chmod(rawname.as_ptr(), mode as libc::mode_t) == 0 {
+            Ok(())
+        } else {
+            Err(Error::last_file_error("chmod", path))
         }
     }
 }
@@ -217,5 +290,17 @@ mod tests {
         let n = b.read(&mut buf).unwrap();
         assert_eq!(n, 3);
         assert_eq!(&buf[0..3], "msg".as_bytes());
+    }
+
+    #[test]
+    fn test_stat() {
+        let estat = stat(std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(estat.file_type(), FileType::File);
+    }
+
+    #[test]
+    fn test_stat_err() {
+        let res = stat(&"/non-existant/really");
+        assert!(res.is_err());
     }
 }

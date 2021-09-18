@@ -129,6 +129,8 @@ impl IFaceV4 {
 
 /// Bring the "lo" interface UP with 127.0.0.1
 pub fn configure_lo() -> Result<()> {
+    log::debug!("Setup loopback interface");
+
     let lo = IFaceV4::new(LOOPBACK)?;
 
     log::debug!("Set lo address");

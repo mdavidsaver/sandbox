@@ -37,6 +37,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 
     fn set_id_map(&self, pid: &Proc) -> Result<(), Error> {
+        log::debug!("Setup ID mapping");
         // Setup 1-1 mapping
         if self.isuser {
             log::debug!("Setup 1-1 UID mapping");
@@ -49,6 +50,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 
     fn setup_priv(&self) -> Result<(), Error> {
+        log::debug!("Privlaged setup");
+
         if !self.allownet {
             net::configure_lo()?;
         }
@@ -64,6 +67,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
         let new_proc = path!(&new_root, "proc");
         let new_devshm = path!(&new_root, "dev", "shm");
 
+        log::debug!("Prepare new root at {}", new_root.display());
+
         // mount --rbind / /tmp/.../root
         util::mount("/", &new_root, "", libc::MS_BIND | libc::MS_REC)?;
 
@@ -74,6 +79,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::maybe_umount_lazy(&new_devshm)?;
         util::maybe_umount_lazy(&new_tmp)?;
         util::maybe_umount_lazy(path!(&new_root, "var", "tmp"))?;
+
+        log::debug!("Fixup non-root mounts");
 
         for mp in Mounts::current()?.into_iter() {
             if !mp.mount_point.starts_with(&new_root) {
@@ -111,6 +118,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
             }
         }
 
+        log::debug!("Add special mounts");
+
         util::mount("none", &new_proc, "proc", NOOPT)?;
         util::mount("none", &new_tmp, "tmpfs", NOOPT)?;
         util::mount("none", &new_devshm, "tmpfs", NOOPT)?;
@@ -118,14 +127,21 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
         // bind writable
         for wdir in &self.writable {
+            let tdir = path!(&new_root, wdir.strip_prefix("/").unwrap());
             log::debug!("Make RW: {}", wdir.display());
-            util::mount(
-                &wdir,
-                path!(&new_root, wdir.strip_prefix("/").unwrap()),
-                "",
-                libc::MS_BIND,
-            )?;
+
+            if tdir.exists() {
+                // nothing to do
+            } else if tdir.starts_with("/tmp") {
+                util::clonedirs(&wdir, &new_root)?;
+            } else {
+                log::error!("PWD in unallowed location");
+            }
+
+            util::mount(&wdir, tdir, "", libc::MS_BIND)?;
         }
+
+        log::debug!("Switch to new root");
 
         util::mkdir(path!(&new_tmp, "oldroot"))?;
 
@@ -139,11 +155,12 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::umount_lazy("/tmp/oldroot")?;
         util::rmdir("/tmp/oldroot")?;
 
+        log::debug!("Switched to new root");
+
         Ok(())
     }
 
     fn setup(&self) -> Result<(), Error> {
-        util::mkdirs(&self.cwd)?; // in case under /tmp
         env::set_current_dir(&self.cwd)?;
 
         log::debug!("EXEC {:?}", &self.args[0..]);
