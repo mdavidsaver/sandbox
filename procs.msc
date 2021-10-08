@@ -1,0 +1,28 @@
+# container setup sequence
+#
+# mscgen -T svg -i procs.msc -o procs.svg
+
+msc {
+  P [label="Parent"], C [label="Child"], G [label="Grandchild"];
+
+  P box P [label="Handle argv[]"];
+  P rbox P [label="hook at_start()"];
+  P => C [label="fork child"];
+  C rbox C [label="hook unshare()"];
+  P <- C [label="sync"];
+  P rbox P [label="hook set_id_map()"];
+  P -> C [label="sync"];
+  P box P [label="Wait"];
+  C => G [label="fork grandchild"];
+  C box C [label="Wait"];
+  G box G [label="Assume SUID perms. and caps."];
+  G rbox G [label="hook setup_priv()"];
+  G box G [label="Drop SUID perms. and caps."];
+  G rbox G [label="hook setup()"];
+  G box G [label="execv*()"];
+  ...;
+  C << G [label="exit()"];
+  C box C [label="exit()"];
+  P << C [label="exit()"];
+  P box P [label="exit()"];
+}

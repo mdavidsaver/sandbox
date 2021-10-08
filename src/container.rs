@@ -70,6 +70,7 @@ fn handle_parent<H: ContainerHooks>(
     // drop SUID-ness
     util::setegid(util::getgid())?;
     util::seteuid(util::getuid())?;
+    util::Cap::current()?.clear().update()?;
     // wait for child to exit
     Ok(pid.park()?)
 }
@@ -121,6 +122,7 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
             // drop SUID-ness
             util::setegid(util::getgid())?;
             util::seteuid(util::getuid())?;
+            util::Cap::current()?.clear().update()?;
             // wait for child to exit
             exit(pid.park()?);
         }
