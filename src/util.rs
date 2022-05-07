@@ -4,8 +4,8 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
-use std::os::unix::io::FromRawFd;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::io::FromRawFd;
 
 use libc;
 
@@ -54,7 +54,9 @@ pub fn clonedirs<A: AsRef<Path>, B: AsRef<Path>>(src: A, target: B) -> Result<()
         let tg = target.as_ref().join(sdir.strip_prefix("/").unwrap());
         if !tg.exists() {
             debug!("clone path {}", tg.display());
-            let st = sdir.metadata().map_err(|e| Error::file("stat()",sdir,e) )?;
+            let st = sdir
+                .metadata()
+                .map_err(|e| Error::file("stat()", sdir, e))?;
             if st.is_dir() {
                 drop(mkdir(&tg)?);
             } else {
