@@ -257,6 +257,7 @@ fn main() -> Result<(), Error> {
             usage();
             return Ok(());
         } else {
+            usage();
             eprintln!("Unknown argument: {arg}");
             process::exit(1);
         }

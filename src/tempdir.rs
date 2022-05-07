@@ -1,7 +1,7 @@
 use libc;
 use std::path::{Path, PathBuf};
 
-use log::error;
+use log::{debug, error};
 
 use super::err::{Error, Result};
 use super::path;
@@ -40,6 +40,8 @@ impl Drop for TempDir {
                 self.name.display(),
                 err
             );
+        } else {
+            debug!("Cleaned up: {}", self.name.display());
         }
     }
 }
