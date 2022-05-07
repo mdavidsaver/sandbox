@@ -49,6 +49,7 @@ impl Drop for TempDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::write_file;
 
     #[test]
     fn test_tempdir() {
