@@ -155,7 +155,12 @@ impl<'a> ContainerHooks for Isolate<'a> {
             // must look up mount info each time.
             let opts = Mounts::current()?.lookup(&tdir)?.options;
 
-            util::mount("", &tdir, "", opts | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND)?;
+            util::mount(
+                "",
+                &tdir,
+                "",
+                opts | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
+            )?;
         }
 
         log::debug!("Switch to new root");
@@ -193,7 +198,8 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
 fn usage() {
     let execname = env::args().next().unwrap();
-    eprint!("Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] [-O|--ro <dir>] <cmd> [args ...]
+    eprint!(
+        "Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] [-O|--ro <dir>] <cmd> [args ...]
 
 Execute command in an isolated environment.  By default only $PWD
 will be writable, with no network access allowed.
@@ -207,7 +213,8 @@ Options:
 eg. prevent a build from accidentally changing files outside of the build directory.
   $ isolate make
 
-");
+"
+    );
 }
 
 fn main() -> Result<(), Error> {
@@ -227,7 +234,7 @@ fn main() -> Result<(), Error> {
         paths.push((&cwd).join(path).canonicalize()?);
         Ok(())
     };
-    
+
     while let Some(arg) = iargs.peek() {
         if !arg.starts_with("-") {
             break;
@@ -236,17 +243,16 @@ fn main() -> Result<(), Error> {
 
         if arg == "-n" || arg == "--net" {
             allownet = true;
-
         } else if arg == "-W" || arg == "--rw" {
-            add_path(&mut writable, &PathBuf::from(
-                iargs.next().expect("-W/--rw expects argument"),
-            ))?;
-
+            add_path(
+                &mut writable,
+                &PathBuf::from(iargs.next().expect("-W/--rw expects argument")),
+            )?;
         } else if arg == "-O" || arg == "--ro" {
-            add_path(&mut readonly, &PathBuf::from(
-                iargs.next().expect("-O/--ro expects argument"),
-            ))?;
-            
+            add_path(
+                &mut readonly,
+                &PathBuf::from(iargs.next().expect("-O/--ro expects argument")),
+            )?;
         } else if arg == "-h" {
             usage();
             return Ok(());
