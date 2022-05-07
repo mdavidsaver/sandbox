@@ -59,11 +59,11 @@ impl Proc {
             return Ok(self.code);
         }
 
-        let signals = Signals::new(&[
-            signal_hook::SIGTERM,
-            signal_hook::SIGINT,
-            signal_hook::SIGQUIT,
-            signal_hook::SIGCHLD,
+        let mut signals = Signals::new(&[
+            signal_hook::consts::SIGTERM,
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGQUIT,
+            signal_hook::consts::SIGCHLD,
         ])
         .map_err(|e| Error::os("Install signal handler", e))?;
         let mut isig = signals.forever();
@@ -84,7 +84,7 @@ impl Proc {
             debug!("Waiting for PID {}", self.pid);
 
             match isig.next() {
-                Some(signal_hook::SIGCHLD) => {
+                Some(signal_hook::consts::SIGCHLD) => {
                     debug!("SIGCHLD");
                     // loop around to test child
                 }
