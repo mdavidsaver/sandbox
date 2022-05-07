@@ -22,9 +22,9 @@ impl TempDir {
                 return Err(Error::last_os_error("mkdtemp"));
             }
         }
-        Ok(TempDir {
-            name: PathBuf::from(template.into_string()?),
-        })
+        let name = PathBuf::from(template.into_string()?);
+        debug!("Temp dir: {}", name.display());
+        Ok(TempDir { name })
     }
 
     pub fn path(&self) -> &Path {
@@ -53,10 +53,17 @@ mod tests {
     #[test]
     fn test_tempdir() {
         let tdir = TempDir::new().unwrap();
-        assert!(
-            std::fs::metadata(tdir.path()).unwrap().is_dir(),
-            "{:?}",
-            tdir
-        );
+        let dir = tdir.path().to_path_buf();
+
+        assert!(dir.is_dir());
+
+        let tfile = dir.join("test.txt");
+        assert!(!tfile.is_file());
+        write_file(&tfile, "Hello world").unwrap();
+        assert!(tfile.is_file());
+
+        drop(tdir);
+        assert!(!tfile.is_file());
+        assert!(!dir.is_dir());
     }
 }

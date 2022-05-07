@@ -62,14 +62,14 @@ pub fn stat<P: AsRef<Path>>(name: P) -> Result<Stat> {
     }
 }
 
-pub fn write_file<P: AsRef<Path>>(name: P, buf: &[u8]) -> Result<()> {
+pub fn write_file<P: AsRef<Path>, S: AsRef<[u8]>>(name: P, buf: S) -> Result<()> {
     debug!("write_file({:?}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(name.as_ref())
         .map_err(|e| Error::file("open", name.as_ref(), e))?;
-    file.write_all(buf)
+    file.write_all(buf.as_ref())
         .map_err(|e| Error::file("write", name.as_ref(), e))
 }
 
