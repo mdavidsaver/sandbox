@@ -1,3 +1,10 @@
+//! sandbox - Limited Linux containers
+//!
+//! Installs executables:
+//! - hidehome - Run command with (apparently) empty $HOME
+//! - isolate  - Run command with only $PWD writable, and not network access.
+//! - nonet    - Run command with no network access
+
 mod err;
 
 mod ext;
