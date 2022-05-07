@@ -128,7 +128,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
         // bind writable
         for wdir in &self.writable {
-            let tdir = path!(&new_root, wdir.strip_prefix("/").unwrap());
+            let tdir = path!(&new_root, wdir.strip_prefix("/")?);
             log::debug!("Make Requested RW: {}", wdir.display());
 
             if tdir.exists() {
@@ -144,7 +144,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
         // bind read-only
         for rdir in &self.readonly {
-            let tdir = path!(&new_root, rdir.strip_prefix("/").unwrap());
+            let tdir = path!(&new_root, rdir.strip_prefix("/")?);
             log::debug!("Make Requested RO: {}", rdir.display());
 
             // creating a RO bind mount is a two step process.
@@ -270,7 +270,7 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     }
 
-    let tdir = TempDir::new().unwrap();
+    let tdir = TempDir::new()?;
     util::chown(tdir.path(), util::getuid(), util::getgid())?;
 
     let cont = Isolate {
