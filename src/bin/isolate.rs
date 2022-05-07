@@ -18,6 +18,7 @@ struct Isolate<'a> {
     args: Vec<String>,
     tdir: &'a Path,
     writable: Vec<PathBuf>,
+    readonly: Vec<PathBuf>,
     cwd: PathBuf,
 }
 
@@ -128,7 +129,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
         // bind writable
         for wdir in &self.writable {
             let tdir = path!(&new_root, wdir.strip_prefix("/").unwrap());
-            log::debug!("Make RW: {}", wdir.display());
+            log::debug!("Make Requested RW: {}", wdir.display());
 
             if tdir.exists() {
                 // nothing to do
@@ -139,6 +140,22 @@ impl<'a> ContainerHooks for Isolate<'a> {
             }
 
             util::mount(&wdir, tdir, "", libc::MS_BIND)?;
+        }
+
+        // bind read-only
+        for rdir in &self.readonly {
+            let tdir = path!(&new_root, rdir.strip_prefix("/").unwrap());
+            log::debug!("Make Requested RO: {}", rdir.display());
+
+            // creating a RO bind mount is a two step process.
+            // first create a normal bind mount (rw vs. ro depends on parent mount)
+            util::mount(&rdir, &tdir, "", libc::MS_BIND)?;
+
+            // now do a re-mount as RO.
+            // must look up mount info each time.
+            let opts = Mounts::current()?.lookup(&tdir)?.options;
+
+            util::mount("", &tdir, "", opts | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND)?;
         }
 
         log::debug!("Switch to new root");
@@ -176,7 +193,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
 fn usage() {
     let execname = env::args().next().unwrap();
-    eprint!("Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] <cmd> [args ...]
+    eprint!("Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] [-O|--ro <dir>] <cmd> [args ...]
 
 Execute command in an isolated environment.  By default only $PWD
 will be writable, with no network access allowed.
@@ -185,6 +202,7 @@ Options:
     -h             - Show this message
     -n --net       - Allow network access
     -W --rw <dir>  - Allow writes to part of the directory tree
+    -O --ro <dir>  - Deny writes to part of the directory tree
 
 eg. prevent a build from accidentally changing files outside of the build directory.
   $ isolate make
@@ -203,8 +221,10 @@ fn main() -> Result<(), Error> {
     let mut rawargs = env::args().skip(1).collect::<Vec<String>>();
     let mut allownet = false;
     let mut writable = vec![cwd.clone()];
-    let mut add_writable = |path: &PathBuf| -> Result<(), Error> {
-        writable.push((&cwd).join(path).canonicalize()?);
+    let mut readonly = Vec::new();
+
+    let add_path = |paths: &mut Vec<PathBuf>, path: &PathBuf| -> Result<(), Error> {
+        paths.push((&cwd).join(path).canonicalize()?);
         Ok(())
     };
 
@@ -214,8 +234,13 @@ fn main() -> Result<(), Error> {
         } else if rawargs[0] == "-n" || rawargs[0] == "--net" {
             allownet = true;
         } else if rawargs[0] == "-W" || rawargs[0] == "--rw" {
-            add_writable(&PathBuf::from(
+            add_path(&mut writable, &PathBuf::from(
                 rawargs.get(1).expect("-W/--rw expects argument"),
+            ))?;
+            rawargs.remove(0);
+        } else if rawargs[0] == "-O" || rawargs[0] == "--ro" {
+            add_path(&mut readonly, &PathBuf::from(
+                rawargs.get(1).expect("-O/--ro expects argument"),
             ))?;
             rawargs.remove(0);
         } else {
@@ -239,10 +264,11 @@ fn main() -> Result<(), Error> {
 
     let cont = Isolate {
         isuser: !util::Cap::current()?.effective(util::CAP_SYS_ADMIN),
-        allownet: allownet,
+        allownet,
         args: rawargs,
         tdir: tdir.path(),
-        writable: writable,
+        writable,
+        readonly,
         cwd: env::current_dir()?,
     };
 
