@@ -246,5 +246,7 @@ fn main() -> Result<(), Error> {
         cwd: env::current_dir()?,
     };
 
-    process::exit(runc(&cont)?);
+    let ret = runc(&cont);
+    drop(tdir);
+    process::exit(ret?);
 }
