@@ -28,7 +28,7 @@ impl Cap {
     pub fn current_pid(pid: libc::pid_t) -> Result<Cap> {
         let mut head = ext::__user_cap_header_struct {
             version: ext::_LINUX_CAPABILITY_VERSION_3,
-            pid: pid,
+            pid,
         };
         let mut data = vec![empty_data(); DATA_SIZE];
 
@@ -67,7 +67,7 @@ impl Cap {
 
         let mut head = ext::__user_cap_header_struct {
             version: ext::_LINUX_CAPABILITY_VERSION_3,
-            pid: pid,
+            pid,
         };
 
         let err = unsafe { ext::capset(&mut head, data.as_mut_ptr()) };

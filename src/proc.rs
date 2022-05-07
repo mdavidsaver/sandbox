@@ -21,7 +21,7 @@ impl Proc {
     pub fn manage(pid: libc::pid_t) -> Proc {
         assert!(pid > 0);
         Proc {
-            pid: pid,
+            pid,
             done: false,
             code: -1, // poison
         }
