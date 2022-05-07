@@ -176,10 +176,20 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
 fn usage() {
     let execname = env::args().next().unwrap();
-    eprintln!(
-        "Usage: {} [-n|--net] [-W|--rw <dir>] <cmd> [args ...]",
-        execname
-    );
+    eprint!("Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] <cmd> [args ...]
+
+Execute command in an isolated environment.  By default only $PWD
+will be writable, with no network access allowed.
+
+Options:
+    -h             - Show this message
+    -n --net       - Allow network access
+    -W --rw <dir>  - Allow writes to part of the directory tree
+
+eg. prevent a build from accidentally changing files outside of the build directory.
+  $ isolate make
+
+");
 }
 
 fn main() -> Result<(), Error> {
@@ -210,8 +220,12 @@ fn main() -> Result<(), Error> {
             rawargs.remove(0);
         } else {
             usage();
-            eprintln!("Unknown argument: {}", rawargs[0]);
-            process::exit(1);
+            if rawargs[0] == "-h" {
+                process::exit(0);
+            } else {
+                eprintln!("Unknown argument: {}", rawargs[0]);
+                process::exit(1);
+            }
         }
         rawargs.remove(0);
     }
