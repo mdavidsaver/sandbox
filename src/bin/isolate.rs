@@ -218,7 +218,7 @@ fn main() -> Result<(), Error> {
         process::exit(2);
     }
 
-    let mut rawargs = env::args().skip(1).collect::<Vec<String>>();
+    let mut iargs = env::args().skip(1).peekable();
     let mut allownet = false;
     let mut writable = vec![cwd.clone()];
     let mut readonly = Vec::new();
@@ -227,33 +227,37 @@ fn main() -> Result<(), Error> {
         paths.push((&cwd).join(path).canonicalize()?);
         Ok(())
     };
-
-    while !rawargs.is_empty() {
-        if !rawargs[0].starts_with("-") {
+    
+    while let Some(arg) = iargs.peek() {
+        if !arg.starts_with("-") {
             break;
-        } else if rawargs[0] == "-n" || rawargs[0] == "--net" {
-            allownet = true;
-        } else if rawargs[0] == "-W" || rawargs[0] == "--rw" {
-            add_path(&mut writable, &PathBuf::from(
-                rawargs.get(1).expect("-W/--rw expects argument"),
-            ))?;
-            rawargs.remove(0);
-        } else if rawargs[0] == "-O" || rawargs[0] == "--ro" {
-            add_path(&mut readonly, &PathBuf::from(
-                rawargs.get(1).expect("-O/--ro expects argument"),
-            ))?;
-            rawargs.remove(0);
-        } else {
-            usage();
-            if rawargs[0] == "-h" {
-                process::exit(0);
-            } else {
-                eprintln!("Unknown argument: {}", rawargs[0]);
-                process::exit(1);
-            }
         }
-        rawargs.remove(0);
+        let arg = iargs.next().unwrap();
+
+        if arg == "-n" || arg == "--net" {
+            allownet = true;
+
+        } else if arg == "-W" || arg == "--rw" {
+            add_path(&mut writable, &PathBuf::from(
+                iargs.next().expect("-W/--rw expects argument"),
+            ))?;
+
+        } else if arg == "-O" || arg == "--ro" {
+            add_path(&mut readonly, &PathBuf::from(
+                iargs.next().expect("-O/--ro expects argument"),
+            ))?;
+            
+        } else if arg == "-h" {
+            usage();
+            return Ok(());
+        } else {
+            eprintln!("Unknown argument: {arg}");
+            process::exit(1);
+        }
     }
+
+    let rawargs = iargs.collect::<Vec<String>>();
+
     if rawargs.len() == 0 {
         usage();
         process::exit(1);
