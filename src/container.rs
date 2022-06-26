@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 use std::error;
 use std::io::{self, Read, Write};
 use std::net;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::process::{exit, Command};
 
 use log::debug;
 
 use libc;
 
-use super::proc::{fork, Fork};
+use super::proc::fork;
 use super::{err, ext, util};
 
 pub use super::proc::Proc;
@@ -75,7 +76,8 @@ fn handle_parent<H: ContainerHooks>(
     Ok(pid.park()?)
 }
 
-fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> Result<()> {
+fn handle_child<H: ContainerHooks>(hooks: &H, toparent: RawFd) -> Result<()> {
+    let mut toparent = unsafe { net::TcpStream::from_raw_fd(toparent) };
     hooks
         .unshare()
         //.annotate("HOOK unshare()")
@@ -115,25 +117,16 @@ fn handle_child<H: ContainerHooks>(hooks: &H, mut toparent: net::TcpStream) -> R
     );
     debug!("Cap {}", util::Cap::current()?);
 
-    match fork()? {
-        Fork::Parent(mut pid) => {
-            debug!("Forked Grandchild {}", pid);
-            debug!("Child park");
-            // drop SUID-ness
-            util::setegid(util::getgid())?;
-            util::seteuid(util::getuid())?;
-            util::Cap::current()?.clear().update()?;
-            // wait for child to exit
-            exit(pid.park()?);
-        }
-        Fork::Child => match handle_grandchild(hooks) {
-            Ok(()) => exit(0),
-            Err(err) => {
-                eprintln!("Grandchild error: {}", err);
-                exit(1)
-            }
-        },
-    }
+    let mut pid = fork(|| handle_grandchild(hooks))?;
+
+    debug!("Forked Grandchild {}", pid);
+    debug!("Child park");
+    // drop SUID-ness
+    util::setegid(util::getgid())?;
+    util::seteuid(util::getuid())?;
+    util::Cap::current()?.clear().update()?;
+    // wait for child to exit
+    exit(pid.park()?);
 }
 
 fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<()> {
@@ -190,24 +183,13 @@ pub fn runc<H: ContainerHooks>(hooks: &H) -> Result<i32> {
     //.annotate("HOOK at_start()")?;
 
     let (parent, child) = util::socketpair()?;
+    let child_fd = child.as_raw_fd();
 
-    match fork()? {
-        Fork::Parent(pid) => {
-            drop(child);
-            debug!("Forked Child {}", pid);
-            handle_parent(hooks, pid, parent)
-        }
-        Fork::Child => {
-            drop(parent);
-            match handle_child(hooks, child) {
-                Ok(()) => exit(0),
-                Err(err) => {
-                    eprintln!("Child error: {}", err);
-                    exit(1)
-                }
-            }
-        }
-    }
+    let pid = fork(|| handle_child(hooks, child_fd))?;
+
+    drop(child);
+    debug!("Forked Child {}", pid);
+    handle_parent(hooks, pid, parent)
 }
 
 pub struct IdMap {
@@ -337,7 +319,7 @@ mod tests {
         let (mut me, dut) = util::socketpair().expect("socketpair");
 
         runc(&TestHooks(RefCell::new(dut))).expect("runc");
-        me.set_nonblocking(true).unwrap();
+        //me.set_nonblocking(true).unwrap();
 
         let mut result = String::new();
         me.read_to_string(&mut result).expect("Read results");

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::{env, ffi, fmt};
+use std::{env, ffi, fmt, process};
 
 use libc;
 use signal_hook;
 use signal_hook::iterator::Signals;
 
-use log::{debug, warn};
+use log::{debug, error, warn};
 
 use super::err::{Error, Result};
 
@@ -216,17 +216,47 @@ impl Exec {
     }
 }
 
-pub enum Fork {
-    Parent(Proc),
-    Child,
+pub fn fork<F, E>(act: F) -> Result<Proc>
+where
+    F: FnOnce() -> std::result::Result<(), E>,
+    E: std::fmt::Display,
+{
+    let ret = unsafe { libc::fork() };
+    if ret < 0 {
+        Err(Error::last_os_error("fork"))
+    } else if ret == 0 {
+        let code = match act() {
+            Ok(()) => 0,
+            Err(err) => {
+                error!("*child error: {}", err);
+                1
+            }
+        };
+        process::exit(code);
+    } else {
+        Ok(Proc::manage(ret))
+    }
 }
 
-pub fn fork() -> Result<Fork> {
-    unsafe {
-        match libc::fork() {
-            err if err < 0 => return Err(Error::last_os_error("fork")),
-            0 => Ok(Fork::Child),
-            pid => Ok(Fork::Parent(Proc::manage(pid))),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_exit0() {
+        let mut pid = fork::<_, Error>(|| {
+            process::exit(0);
+        })
+        .unwrap();
+        assert_eq!(0, pid.park().unwrap());
+    }
+
+    #[test]
+    fn test_exit42() {
+        let mut pid = fork::<_, Error>(|| {
+            process::exit(42);
+        })
+        .unwrap();
+        assert_eq!(42, pid.park().unwrap());
     }
 }
