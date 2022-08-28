@@ -219,7 +219,8 @@ eg. prevent a build from accidentally changing files outside of the build direct
 }
 
 fn main() -> Result<(), Error> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     let cwd = env::current_dir()?.canonicalize()?;
     if !cwd.is_absolute() {
         eprintln!("curdir is not absolute?!?");
@@ -232,9 +233,10 @@ fn main() -> Result<(), Error> {
     let mut readonly = Vec::new();
     let mut writepwd = true;
 
-    let add_path = |paths: &mut Vec<PathBuf>, path: &PathBuf| -> Result<(), Error> {
-        paths.push((&cwd).join(path).canonicalize()?);
-        Ok(())
+    let add_path = |paths: &mut Vec<PathBuf>, path: &PathBuf| match (&cwd).join(path).canonicalize()
+    {
+        Ok(p) => paths.push(p),
+        Err(e) => log::warn!("Ignore: {} : {}", path.display(), e),
     };
 
     while let Some(arg) = iargs.peek() {
@@ -251,12 +253,12 @@ fn main() -> Result<(), Error> {
             add_path(
                 &mut writable,
                 &PathBuf::from(iargs.next().expect("-W/--rw expects argument")),
-            )?;
+            );
         } else if arg == "-O" || arg == "--ro" {
             add_path(
                 &mut readonly,
                 &PathBuf::from(iargs.next().expect("-O/--ro expects argument")),
-            )?;
+            );
         } else if arg == "-h" {
             usage();
             return Ok(());
@@ -275,7 +277,7 @@ fn main() -> Result<(), Error> {
     }
 
     if writepwd {
-        add_path(&mut writable, &cwd)?;
+        add_path(&mut writable, &cwd);
     }
 
     let tdir = TempDir::new()?;
