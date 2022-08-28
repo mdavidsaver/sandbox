@@ -1,5 +1,5 @@
-use std::net::{self, Ipv4Addr, TcpStream};
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::net::{self, Ipv4Addr};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::ptr;
 
 use log;
@@ -26,7 +26,7 @@ fn b2u32(b: [u8; 4]) -> u32 {
 
 pub struct IFaceV4 {
     req: ext::ifreq,
-    sock: TcpStream,
+    sock: OwnedFd,
 }
 
 impl IFaceV4 {
@@ -43,7 +43,7 @@ impl IFaceV4 {
             if ret < 0 {
                 Err(Error::last_os_error("socket()"))?;
             }
-            sock = TcpStream::from_raw_fd(ret);
+            sock = OwnedFd::from_raw_fd(ret);
 
             // copy in iface with nil
             ptr::copy_nonoverlapping(

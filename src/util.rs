@@ -171,19 +171,6 @@ where
     Ok(())
 }
 
-pub fn create_file<P: AsRef<Path>>(fname: P, perm: libc::mode_t) -> Result<fs::File> {
-    let rawname = path2cstr(&fname)?;
-    let fd;
-    unsafe {
-        fd = libc::creat(rawname.as_ptr(), perm);
-        if fd < 0 {
-            Err(Error::last_file_error("creat", fname))
-        } else {
-            Ok(fs::File::from_raw_fd(fd))
-        }
-    }
-}
-
 pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     debug!("umount({:?})", path.as_ref().display());
     let rawname = path2cstr(&path)?;
