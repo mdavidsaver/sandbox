@@ -11,6 +11,7 @@ use sandbox::{net, util};
 use sandbox::{runc, Error};
 
 const NOOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
+const TMPOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOSUID | libc::MS_RELATIME;
 
 struct Isolate<'a> {
     isuser: bool,
@@ -122,9 +123,9 @@ impl<'a> ContainerHooks for Isolate<'a> {
         log::debug!("Add special mounts");
 
         util::mount("none", &new_proc, "proc", NOOPT)?;
-        util::mount("none", &new_tmp, "tmpfs", NOOPT)?;
+        util::mount("none", &new_tmp, "tmpfs", TMPOPT)?;
         util::mount("none", &new_devshm, "tmpfs", NOOPT)?;
-        util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", NOOPT)?;
+        util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", TMPOPT)?;
 
         // bind writable
         for wdir in &self.writable {
