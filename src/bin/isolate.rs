@@ -199,14 +199,15 @@ impl<'a> ContainerHooks for Isolate<'a> {
 fn usage() {
     let execname = env::args().next().unwrap();
     eprint!(
-        "Usage: {execname} [-h] [-n|--net] [-W|--rw <dir>] [-O|--ro <dir>] <cmd> [args ...]
+        "Usage: {execname} [-h] [-N|--net] [-W|--rw <dir>] [-O|--ro <dir>] <cmd> [args ...]
 
 Execute command in an isolated environment.  By default only $PWD
 will be writable, with no network access allowed.
 
 Options:
     -h             - Show this message
-    -n --net       - Allow network access
+    -N --net       - Allow network access
+    -c --no-pwd    - Deny writes to $PWD
     -W --rw <dir>  - Allow writes to part of the directory tree
     -O --ro <dir>  - Deny writes to part of the directory tree
 
@@ -227,8 +228,9 @@ fn main() -> Result<(), Error> {
 
     let mut iargs = env::args().skip(1).peekable();
     let mut allownet = false;
-    let mut writable = vec![cwd.clone()];
+    let mut writable = vec![];
     let mut readonly = Vec::new();
+    let mut writepwd = true;
 
     let add_path = |paths: &mut Vec<PathBuf>, path: &PathBuf| -> Result<(), Error> {
         paths.push((&cwd).join(path).canonicalize()?);
@@ -241,8 +243,10 @@ fn main() -> Result<(), Error> {
         }
         let arg = iargs.next().unwrap();
 
-        if arg == "-n" || arg == "--net" {
+        if arg == "-n" || arg == "-N" || arg == "--net" {
             allownet = true;
+        } else if arg == "-c" || arg == "--no-pwd" {
+            writepwd = false;
         } else if arg == "-W" || arg == "--rw" {
             add_path(
                 &mut writable,
@@ -268,6 +272,10 @@ fn main() -> Result<(), Error> {
     if rawargs.len() == 0 {
         usage();
         process::exit(1);
+    }
+
+    if writepwd {
+        add_path(&mut writable, &cwd)?;
     }
 
     let tdir = TempDir::new()?;
