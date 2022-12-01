@@ -1,14 +1,13 @@
-use std::net::{self, Ipv4Addr};
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+use std::fs::{File, OpenOptions};
+use std::io::Read;
+use std::net::{self, Ipv4Addr, UdpSocket};
+use std::os::unix::prelude::*;
 use std::ptr;
 
 use log;
 
-use super::ext;
-
-pub use ext::IFF_UP;
-
 use super::err::{Error, Result};
+use super::{ext, proc, util};
 
 pub const LOOPBACK: &str = "lo";
 
@@ -24,27 +23,17 @@ fn b2u32(b: [u8; 4]) -> u32 {
     ret
 }
 
-pub struct IFaceV4 {
-    req: ext::ifreq,
-    sock: OwnedFd,
-}
+#[derive(Copy, Clone)] // ifreq stores no pointers
+struct IfReq(ext::ifreq);
 
-impl IFaceV4 {
-    pub fn new<S: AsRef<str>>(name: S) -> Result<IFaceV4> {
+impl IfReq {
+    fn from_name<S: AsRef<str>>(name: S) -> Result<Self> {
         let rawname = name.as_ref().as_bytes().to_vec();
         let mut req = ext::ifreq::default();
-        let sock;
         unsafe {
             if rawname.len() >= ::std::mem::size_of_val(&req.ifr_ifrn.ifrn_name) {
                 Err(Error::TooLong)?;
             }
-
-            let ret = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
-            if ret < 0 {
-                Err(Error::last_os_error("socket()"))?;
-            }
-            sock = OwnedFd::from_raw_fd(ret);
-
             // copy in iface with nil
             ptr::copy_nonoverlapping(
                 rawname.as_ptr(),
@@ -53,77 +42,182 @@ impl IFaceV4 {
             );
             req.ifr_ifrn.ifrn_name[rawname.len()] = 0;
         }
-        Ok(IFaceV4 { req, sock })
+        Ok(Self(req))
     }
 
-    pub fn flags(&self) -> Result<u32> {
-        let req = self.req.clone();
+    unsafe fn ioctl<FD: AsRawFd>(&mut self, fd: FD, req: u32) -> Result<()> {
+        let err = ext::ioctl(fd.as_raw_fd(), req as _, &mut self.0);
+        if err != 0 {
+            let mut raw = vec![0; ::std::mem::size_of_val(&self.0)];
+            ptr::copy_nonoverlapping(
+                &self.0 as *const _ as *const u8,
+                raw.as_mut_ptr(),
+                raw.len(),
+            );
+            Err(Error::last_os_error(format!(
+                "ioctl({}, {:?}) -> {}",
+                req, raw, err
+            )))?;
+        }
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for IfReq {
+    type Target = ext::ifreq;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for IfReq {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+// Network Interface Configurator
+pub struct IfConfig(UdpSocket);
+
+impl IfConfig {
+    pub fn new() -> Result<Self> {
+        let sock =
+            UdpSocket::bind("127.0.0.1:0").map_err(|e| Error::os("bind() ifconfig socket", e))?;
+        Ok(Self(sock))
+    }
+
+    pub fn ifindex<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
+        let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
-            if ext::ioctl(
-                self.sock.as_raw_fd(),
-                ext::SIOCGIFFLAGS as ::std::os::raw::c_ulong,
-                &req,
-            ) != 0
-            {
-                Err(Error::last_os_error("ioctl(SIOCGIFFLAGS)"))?;
-            }
-            Ok(req.ifr_ifru.ifru_flags as u32)
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFINDEX)?;
+            let ret = req.ifr_ifru.ifru_ivalue as u32;
+            log::debug!("ifindex({:?}) -> {}", ifname.as_ref(), ret);
+            Ok(ret)
         }
     }
 
-    pub fn set_flags(&self, flags: u32) -> Result<()> {
-        let mut req = self.req.clone();
+    /// Lookup interface flags
+    pub fn ifflags<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
+        let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
-            req.ifr_ifru.ifru_flags = flags as libc::c_short;
-            if ext::ioctl(
-                self.sock.as_raw_fd(),
-                ext::SIOCSIFFLAGS as ::std::os::raw::c_ulong,
-                &req,
-            ) != 0
-            {
-                Err(Error::last_os_error("ioctl(SIOCSIFFLAGS)"))?;
-            }
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFFLAGS)?;
+            let ret = req.ifr_ifru.ifru_flags as u32;
+            log::debug!("ifflags({:?}) -> {}", ifname.as_ref(), ret);
+            Ok(ret)
+        }
+    }
+
+    pub fn set_ifflags<S: AsRef<str>>(&self, ifname: S, flags: u32) -> Result<()> {
+        log::debug!("set_ifflags({:?}, {})", ifname.as_ref(), flags);
+        let mut req = IfReq::from_name(ifname)?;
+        unsafe {
+            req.ifr_ifru.ifru_flags = flags as _;
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCSIFFLAGS)?;
             Ok(())
         }
     }
 
-    pub fn address(&self) -> Result<net::Ipv4Addr> {
-        let req = self.req.clone();
+    pub fn address<S: AsRef<str>>(&self, ifname: S) -> Result<net::Ipv4Addr> {
+        let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
-            if ext::ioctl(
-                self.sock.as_raw_fd(),
-                ext::SIOCGIFADDR as ::std::os::raw::c_ulong,
-                &req,
-            ) != 0
-            {
-                Err(Error::last_os_error("ioctl(SIOCGIFADDR)"))?;
-            }
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFADDR)?;
             if req.ifr_ifru.ifru_addr.sa_family != libc::AF_INET as libc::sa_family_t {
                 Err(Error::NotIPv4)?;
             }
             let inaddr = &req.ifr_ifru.ifru_addr as *const _ as *const libc::sockaddr_in;
-            Ok(net::Ipv4Addr::from(u32::from_be((*inaddr).sin_addr.s_addr)))
+            let ret = net::Ipv4Addr::from(u32::from_be((*inaddr).sin_addr.s_addr));
+            log::debug!("address({:?}) -> {}", ifname.as_ref(), ret);
+            Ok(ret)
         }
     }
 
-    pub fn set_address(&self, addr: net::Ipv4Addr) -> Result<()> {
+    pub fn set_address<S: AsRef<str>>(&self, ifname: S, addr: net::Ipv4Addr) -> Result<()> {
+        log::debug!("set_address({:?}, {})", ifname.as_ref(), addr);
         let iaddr = b2u32(addr.octets());
-        let mut req = self.req.clone();
+        let mut req = IfReq::from_name(ifname)?;
         unsafe {
             let mut inaddr = &mut req.ifr_ifru.ifru_addr as *mut _ as *mut libc::sockaddr_in;
             (*inaddr).sin_family = libc::AF_INET as libc::sa_family_t;
             (*inaddr).sin_port = 0;
             (*inaddr).sin_addr.s_addr = iaddr;
-            if ext::ioctl(
-                self.sock.as_raw_fd(),
-                ext::SIOCSIFADDR as ::std::os::raw::c_ulong,
-                &req,
-            ) != 0
-            {
-                Err(Error::last_os_error("ioctl(SIOCSIFADDR)"))?;
-            }
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCSIFADDR)?;
         }
         Ok(())
+    }
+
+    pub fn bridge_create<B: AsRef<str>>(&self, brname: B) -> Result<()> {
+        log::debug!("bridge_create({:?})", brname.as_ref());
+        let mut req = IfReq::from_name(brname)?;
+        unsafe {
+            // only the interface name is used
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCBRADDBR)?;
+            Ok(())
+        }
+    }
+
+    pub fn bridge_add<B: AsRef<str>, S: AsRef<str>>(&self, brname: B, ifname: S) -> Result<()> {
+        let index = self.ifindex(ifname.as_ref())?;
+        log::debug!(
+            "bridge_add({:?}, {:?} ({}))",
+            brname.as_ref(),
+            ifname.as_ref(),
+            index
+        );
+        let mut req = IfReq::from_name(brname)?;
+        req.ifr_ifru.ifru_ivalue = index as _;
+        unsafe {
+            req.ioctl(self.0.as_raw_fd(), ext::SIOCBRADDIF)?;
+            Ok(())
+        }
+    }
+}
+
+pub struct TunTap {
+    name: String,
+    fd: File,
+}
+
+impl TunTap {
+    pub fn new<S: AsRef<str>>(name: S) -> Result<Self> {
+        log::debug!("TunTap::new({:?})", name.as_ref());
+        let name = name.as_ref().to_string();
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")
+            .map_err(|e| Error::file("tuntap", "/dev/net/tun", e))?;
+
+        let mut req = IfReq::from_name(&name)?;
+        req.ifr_ifru.ifru_flags = (ext::IFF_TAP | ext::IFF_NO_PI) as _;
+        unsafe {
+            req.ioctl(fd.as_raw_fd(), ext::REAL_TUNSETIFF)?;
+        }
+
+        Ok(Self { name, fd })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    // fork() child process which will read and discard any packets
+    // set to this interface.  Keeps IFF_RUNNING
+    pub fn handle_ignore(self) -> Result<proc::Proc> {
+        let fd: OwnedFd = self.fd.into();
+        let chld_fd = fd.as_raw_fd();
+
+        util::set_cloexec(chld_fd, false)?;
+        let err = proc::fork(|| -> std::io::Result<()> {
+            let mut file = unsafe { File::from_raw_fd(chld_fd) };
+            let mut buf = vec![0; 0x10000];
+            loop {
+                file.read(&mut buf)?;
+            }
+        });
+        util::set_cloexec(chld_fd, true)?;
+        let chld = err?;
+
+        Ok(chld)
     }
 }
 
@@ -131,18 +225,43 @@ impl IFaceV4 {
 pub fn configure_lo() -> Result<()> {
     log::debug!("Setup loopback interface");
 
-    let lo = IFaceV4::new(LOOPBACK)?;
+    let conf = IfConfig::new()?;
 
     log::debug!("Set lo address");
-    lo.set_address(Ipv4Addr::LOCALHOST)?;
+    conf.set_address(LOOPBACK, Ipv4Addr::LOCALHOST)?;
 
-    let flags = lo.flags()?;
-    if 0 == (flags & IFF_UP) {
+    let flags = conf.ifflags(LOOPBACK)?;
+    if 0 == (flags & ext::IFF_UP) {
         log::debug!("Bring lo UP");
-        lo.set_flags(IFF_UP | flags)?;
+        conf.set_ifflags(LOOPBACK, ext::IFF_UP | flags)?;
     }
 
     Ok(())
+}
+
+pub struct Bridge(proc::Proc);
+
+/// Add a broadcast capable bridge with a dummy tun interface
+pub fn dummy_bridge() -> Result<Bridge> {
+    log::debug!("Setup dummy bridge");
+
+    let conf = IfConfig::new()?;
+
+    conf.bridge_create("br0")?;
+
+    let tun = TunTap::new("tap0")?;
+
+    conf.bridge_add("br0", tun.name())?;
+
+    let brf = conf.ifflags("br0")?;
+    conf.set_address("br0", Ipv4Addr::new(192, 168, 1, 1))?;
+    conf.set_ifflags("br0", brf | ext::IFF_UP)?;
+
+    let brf = conf.ifflags(tun.name())?;
+    conf.set_ifflags(tun.name(), brf | ext::IFF_UP)?;
+    // TODO: why does tap0 have an ipv6 address?
+
+    Ok(Bridge(tun.handle_ignore()?))
 }
 
 #[cfg(test)]
@@ -151,16 +270,23 @@ mod tests {
 
     #[test]
     fn lo_flags() {
-        let iface = IFaceV4::new(LOOPBACK).expect("Can't make lo");
-
-        let flags = iface.flags().expect("flags");
+        let conf = IfConfig::new().unwrap();
+        let flags = conf.ifflags(LOOPBACK).expect("flags");
         assert!((flags & ext::IFF_LOOPBACK) != 0, "flags {}", flags);
     }
 
     #[test]
     fn lo_addr() {
-        let iface = IFaceV4::new(LOOPBACK).expect("Can't make lo");
-        let addr = iface.address().expect("address");
+        let conf = IfConfig::new().unwrap();
+        let addr = conf.address(LOOPBACK).expect("address");
         assert_eq!(addr, net::Ipv4Addr::LOCALHOST);
+    }
+
+    #[test]
+    fn lo_index() {
+        let conf = IfConfig::new().unwrap();
+        let idx = conf.ifindex(LOOPBACK).expect("address");
+        // TODO: is this actually certain?
+        assert_eq!(idx, 1);
     }
 }

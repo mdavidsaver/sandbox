@@ -26,7 +26,14 @@ fn main() {
         .allowlist_var("SIOCSIFFLAGS")
         .allowlist_var("SIOCGIFADDR")
         .allowlist_var("SIOCSIFADDR")
+        .allowlist_var("SIOCGIFINDEX")
+        .allowlist_var("SIOCSIFMTU")
+        .allowlist_var("SIOCBRADDBR")
+        .allowlist_var("SIOCBRADDIF")
+        .allowlist_var("REAL_TUNSETIFF")
         .allowlist_var("IFF_UP")
+        .allowlist_var("IFF_TAP")
+        .allowlist_var("IFF_NO_PI")
         .generate()
         .expect("Unable to generate bindings");
 

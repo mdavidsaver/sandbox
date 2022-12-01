@@ -6,8 +6,8 @@ set -e
 name="$1"
 shift
 
-sudo install -m 04755 target/debug/"$name" /usr/local/bin/"$name"
+sudo install -m 04755 target/debug/"$name" /usr/local/bin/"$name"-test
 
-/usr/local/bin/"$name" "$@"
+/usr/local/bin/"$name"-test "$@"
 
-sudo rm /usr/local/bin/"$name"
+sudo rm /usr/local/bin/"$name"-test

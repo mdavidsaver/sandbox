@@ -2,6 +2,7 @@ use std::ffi::CString;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
+use std::os::unix::prelude::*;
 use std::path::{Path, PathBuf};
 
 use std::os::unix::fs::MetadataExt;
@@ -222,6 +223,26 @@ pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> R
             Err(Error::last_file_error("pivot_root", new_root))
         }
     }
+}
+
+pub fn set_cloexec<F: AsRawFd>(fd: F, v: bool) -> Result<()> {
+    let fdn = fd.as_raw_fd();
+    unsafe {
+        let mut cur = libc::fcntl(fdn, libc::F_GETFD);
+        if cur < 0 {
+            return Err(Error::last_os_error("F_GETFD"));
+        }
+        if v {
+            cur |= libc::O_CLOEXEC;
+        } else {
+            cur &= !libc::O_CLOEXEC;
+        }
+        let err = libc::fcntl(fdn, libc::F_SETFD, cur);
+        if err < 0 {
+            return Err(Error::last_os_error("F_SETFD"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

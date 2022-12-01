@@ -21,6 +21,7 @@ struct Isolate<'a> {
     writable: Vec<PathBuf>,
     readonly: Vec<PathBuf>,
     cwd: PathBuf,
+    bridge: std::cell::Cell<Option<net::Bridge>>,
 }
 
 impl<'a> ContainerHooks for Isolate<'a> {
@@ -56,6 +57,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
         if !self.allownet {
             net::configure_lo()?;
+            self.bridge.set(Some(net::dummy_bridge()?));
         }
 
         // begin by isolating our new mount ns
@@ -292,6 +294,7 @@ fn main() -> Result<(), Error> {
         writable,
         readonly,
         cwd: env::current_dir()?,
+        bridge: std::cell::Cell::new(None),
     };
 
     let ret = runc(&cont);
