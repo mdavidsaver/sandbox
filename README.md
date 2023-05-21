@@ -2,10 +2,10 @@ Lightweight partial Linux containers
 ====================================
 
 Toolkit, and several examples of, non-system container environments on Linux.
-Also, no dependency on system utilities (eg. `mount` or `ifconfig`).
-(`newuidmap` and `newgidmap` are required only with non-privlaged user namespaces)
+Also, no dependency on system utilities (eg. `mount` or `ifconfig`) except
+`newuidmap` and `newgidmap` which are required only with non-privlaged user namespaces.
 
-* `isolate <cmd> [args...]`
+* `isolate [options] <cmd> [args...]`
 
 Run a command with most of the filesystem tree re-mounted as read-only,
 with the exception of `$PWD`, also without network access.
@@ -32,5 +32,5 @@ Should be installed with SUID set.
 ## Debug
 
 ```
-export RUST_LOG=debug
+export RUST_LOG=DEBUG
 ```

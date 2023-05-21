@@ -1,3 +1,5 @@
+//! Manage a temporary directory
+
 use libc;
 use std::path::{Path, PathBuf};
 
@@ -6,12 +8,14 @@ use log::{debug, error};
 use super::err::{Error, Result};
 use super::path;
 
+/// A temporary directory which will be `rm -rf` when dropped.
 #[derive(Debug)]
 pub struct TempDir {
     name: PathBuf,
 }
 
 impl TempDir {
+    /// Create a new temporary directory
     pub fn new() -> Result<TempDir> {
         let template = path!(std::env::temp_dir(), "sandbox-XXXXXX");
         let template = std::ffi::CString::new(template.to_str().unwrap())?;
@@ -27,6 +31,7 @@ impl TempDir {
         Ok(TempDir { name })
     }
 
+    /// Where is it?
     pub fn path(&self) -> &Path {
         &self.name
     }

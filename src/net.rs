@@ -1,3 +1,5 @@
+//! Direct manipulations of network configuration.  (eg. like `/sbin/ifconfig` or `/sbin/ip`)
+
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::net::{self, Ipv4Addr, UdpSocket};
@@ -23,10 +25,12 @@ fn b2u32(b: [u8; 4]) -> u32 {
     ret
 }
 
+/// Wrap a `struct ifreq`.  Effectively an interface name.
 #[derive(Copy, Clone)] // ifreq stores no pointers
 struct IfReq(ext::ifreq);
 
 impl IfReq {
+    /// Fill in `ifreq::ifr_name`
     fn from_name<S: AsRef<str>>(name: S) -> Result<Self> {
         let rawname = name.as_ref().as_bytes().to_vec();
         let mut req = ext::ifreq::default();
@@ -45,6 +49,7 @@ impl IfReq {
         Ok(Self(req))
     }
 
+    /// Make a `ioctl()` on the named interface
     unsafe fn ioctl<FD: AsRawFd>(&mut self, fd: FD, req: u32) -> Result<()> {
         let err = ext::ioctl(fd.as_raw_fd(), req as _, &mut self.0);
         if err != 0 {
@@ -76,16 +81,18 @@ impl std::ops::DerefMut for IfReq {
     }
 }
 
-// Network Interface Configurator
+/// Network Interface Configurator.  A (small) sub-set of `/sbin/ifconfig`
 pub struct IfConfig(UdpSocket);
 
 impl IfConfig {
+    /// Prepare to maniplate.  (allocates a "dummy" socket)
     pub fn new() -> Result<Self> {
         let sock =
             UdpSocket::bind("127.0.0.1:0").map_err(|e| Error::os("bind() ifconfig socket", e))?;
         Ok(Self(sock))
     }
 
+    /// Map network interface name to numeric index
     pub fn ifindex<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
@@ -96,7 +103,7 @@ impl IfConfig {
         }
     }
 
-    /// Lookup interface flags
+    /// Lookup interface flags bit mask
     pub fn ifflags<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
@@ -107,6 +114,7 @@ impl IfConfig {
         }
     }
 
+    /// Overwrite interface flags bit mask
     pub fn set_ifflags<S: AsRef<str>>(&self, ifname: S, flags: u32) -> Result<()> {
         log::debug!("set_ifflags({:?}, {})", ifname.as_ref(), flags);
         let mut req = IfReq::from_name(ifname)?;
@@ -117,6 +125,8 @@ impl IfConfig {
         }
     }
 
+    /// Find "the" IPv4 address of the named interface.
+    /// Unspecified (as in I don't know) how this behaves when more than one IPv4 address is assigned.
     pub fn address<S: AsRef<str>>(&self, ifname: S) -> Result<net::Ipv4Addr> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
         unsafe {
@@ -131,6 +141,7 @@ impl IfConfig {
         }
     }
 
+    /// Set "the" IPv4 address of the named interface.
     pub fn set_address<S: AsRef<str>>(&self, ifname: S, addr: net::Ipv4Addr) -> Result<()> {
         log::debug!("set_address({:?}, {})", ifname.as_ref(), addr);
         let iaddr = b2u32(addr.octets());
@@ -145,6 +156,7 @@ impl IfConfig {
         Ok(())
     }
 
+    /// Create a soft ethernet bridge
     pub fn bridge_create<B: AsRef<str>>(&self, brname: B) -> Result<()> {
         log::debug!("bridge_create({:?})", brname.as_ref());
         let mut req = IfReq::from_name(brname)?;
@@ -155,6 +167,7 @@ impl IfConfig {
         }
     }
 
+    /// Add an interface to a soft ethernet bridge
     pub fn bridge_add<B: AsRef<str>, S: AsRef<str>>(&self, brname: B, ifname: S) -> Result<()> {
         let index = self.ifindex(ifname.as_ref())?;
         log::debug!(
@@ -172,12 +185,15 @@ impl IfConfig {
     }
 }
 
+/// Management of a TUN or TAP interface
 pub struct TunTap {
     name: String,
     fd: File,
 }
 
 impl TunTap {
+    /// Create a new TAP interface.
+    /// Lifetime is tied to the returned `TunTap`
     pub fn new<S: AsRef<str>>(name: S) -> Result<Self> {
         log::debug!("TunTap::new({:?})", name.as_ref());
         let name = name.as_ref().to_string();
@@ -200,8 +216,8 @@ impl TunTap {
         &self.name
     }
 
-    // fork() child process which will read and discard any packets
-    // set to this interface.  Keeps IFF_RUNNING
+    /// fork() a child process which will read and discard any packets
+    /// set to this interface.  Keeps `IFF_RUNNING`
     pub fn handle_ignore(self) -> Result<proc::Proc> {
         let fd: OwnedFd = self.fd.into();
         let chld_fd = fd.as_raw_fd();
@@ -239,9 +255,10 @@ pub fn configure_lo() -> Result<()> {
     Ok(())
 }
 
+/// A "dummy" software ethernet bridge
 pub struct Bridge(proc::Proc);
 
-/// Add a broadcast capable bridge with a dummy tun interface
+/// Add a broadcast capable bridge with a dummy tun interface.
 pub fn dummy_bridge() -> Result<Bridge> {
     log::debug!("Setup dummy bridge");
 

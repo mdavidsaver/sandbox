@@ -1,3 +1,4 @@
+//! Manipulate Linux process capability bit masks
 use std::fmt;
 
 use super::ext;
@@ -21,10 +22,12 @@ fn empty_data() -> ext::__user_cap_data_struct {
 }
 
 impl Cap {
-    pub fn current() -> Result<Cap> {
+    /// Fetch the current capabilities of this process
+    pub fn current() -> Result<Self> {
         Cap::current_pid(0)
     }
 
+    /// Fetch the current capabilities of the specified process.  (0 for the current process)
     pub fn current_pid(pid: libc::pid_t) -> Result<Cap> {
         let mut head = ext::__user_cap_header_struct {
             version: ext::_LINUX_CAPABILITY_VERSION_3,
@@ -52,10 +55,12 @@ impl Cap {
         Ok(ret)
     }
 
+    /// Apply these capabilities to the current process
     pub fn update(&self) -> Result<()> {
         self.update_pid(0)
     }
 
+    /// Apply these capabilities to the specified process.  (0 for the current process)
     pub fn update_pid(&self, pid: libc::pid_t) -> Result<()> {
         let mut data = vec![empty_data(); DATA_SIZE];
 
@@ -77,7 +82,7 @@ impl Cap {
         Ok(())
     }
 
-    /// Copy permitted to effective
+    /// Copy permitted mask to effective mask
     pub fn activate(&mut self) -> &mut Self {
         for i in 0..self.effective.len() {
             self.effective[i] = self.permitted[i];
@@ -85,6 +90,7 @@ impl Cap {
         self
     }
 
+    /// Clear all bits in the effective mask
     pub fn clear_effective(&mut self) -> &mut Self {
         for i in 0..self.effective.len() {
             self.effective[i] = 0;
@@ -92,6 +98,7 @@ impl Cap {
         self
     }
 
+    /// Clear all bits in the permitted mask
     pub fn clear_permitted(&mut self) -> &mut Self {
         for i in 0..self.permitted.len() {
             self.permitted[i] = 0;
@@ -99,6 +106,7 @@ impl Cap {
         self
     }
 
+    /// Clear all bits in the inheritable mask
     pub fn clear_inheritable(&mut self) -> &mut Self {
         for i in 0..self.inheritable.len() {
             self.inheritable[i] = 0;
@@ -106,10 +114,12 @@ impl Cap {
         self
     }
 
+    /// Clear all bit masks
     pub fn clear(&mut self) -> &mut Self {
         self.clear_effective().clear_permitted().clear_inheritable()
     }
 
+    /// Test a bit in the effective mask
     pub fn effective(&self, cap: u32) -> bool {
         let word = cap / 32;
         let bit = cap % 32;

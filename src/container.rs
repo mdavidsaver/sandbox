@@ -1,3 +1,6 @@
+//! Linux container (aka. namespace) management.
+//!
+//! Handles the double `fork()` needed to place a process into newly created namespaces.
 use std::collections::BTreeMap;
 use std::error;
 use std::io::{self, Read, Write};
@@ -18,6 +21,23 @@ pub type Error = Box<dyn error::Error + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Container lifecycle hooks
+///
+/// Methods called via. `runc()`
+///
+/// ```text
+/// runc() \  # in parent process
+///        |- ContainerHooks::at_start()
+///        |- fork() # create child process
+///        |  \- ContainerHooks::unshare()
+///        |-- | - ContainerHooks::set_id_map()
+///        |   |-- fork() # create grandchild process
+///        |   |   \- ContainerHooks::setup_priv()
+///        |   |    |- Drop privilege
+///        |   |    |- ContainerHooks::setup()
+///        |   |    \- execvpe()
+///        |   \- waitpid() # child waits for grandchild
+///        \- waitpid() # parent waits for child
+/// ```
 #[allow(unused_variables)]
 pub trait ContainerHooks {
     /// Called in parent process before child is forked
@@ -32,11 +52,11 @@ pub trait ContainerHooks {
     fn set_id_map(&self, pid: &Proc) -> Result<()> {
         Ok(())
     }
-    /// Called from grandchild with full privlage (all capabilities)
+    /// Called from grandchild with full privilege (all capabilities)
     fn setup_priv(&self) -> Result<()> {
         Ok(())
     }
-    /// Called from grandchild with final privlage (no capabilities)
+    /// Called from grandchild with final privilege (no capabilities)
     fn setup(&self) -> Result<()> {
         Ok(())
     }
@@ -90,7 +110,7 @@ fn handle_child<H: ContainerHooks>(hooks: &H, toparent: RawFd) -> Result<()> {
                 eprintln!("Error: Insufficient permission to unshare.");
                 eprintln!("");
                 eprintln!("       Must either have root (uid 0), CAP_SYS_ADMIN,");
-                eprintln!("       or enable non-privlaged user namespaces by eg.");
+                eprintln!("       or enable non-privileged user namespaces by eg.");
                 eprintln!("");
                 eprintln!("       echo 1 > /proc/sys/kernel/unprivileged_userns_clone");
                 exit(1);
@@ -175,7 +195,9 @@ fn handle_grandchild<H: ContainerHooks>(hooks: &H) -> Result<()> {
     Ok(())
 }
 
-/// Launch container with given hooks.
+/// Launch container with given hooks.  Blocks until container process 1 exits.
+/// Returns with container process 1 exit code.
+/// May be interrupted by `SIGINT`.
 pub fn runc<H: ContainerHooks>(hooks: &H) -> Result<i32> {
     // communications between parent and child to coordinate SetIdMap()
 
@@ -192,6 +214,11 @@ pub fn runc<H: ContainerHooks>(hooks: &H) -> Result<i32> {
     handle_parent(hooks, pid, parent)
 }
 
+/// Helper for setting up UID and GID mappings for a new user namespace.
+///
+/// Acts either by directly manipulating `/proc/<pid>/uid_map` and `/proc/<pid>/gid_map`,
+/// or calling out to the `newuidmap` and `newgidmap` executables when necessary
+/// (unprivileged user namespace).
 pub struct IdMap {
     pid: libc::pid_t,
     isuid: bool,
@@ -199,6 +226,7 @@ pub struct IdMap {
 }
 
 impl IdMap {
+    /// Start a new UID mapping
     pub fn new_uid(pid: libc::pid_t) -> IdMap {
         IdMap {
             pid,
@@ -207,6 +235,7 @@ impl IdMap {
         }
     }
 
+    /// Start a new GID mapping
     pub fn new_gid(pid: libc::pid_t) -> IdMap {
         IdMap {
             pid,
@@ -215,6 +244,8 @@ impl IdMap {
         }
     }
 
+    /// Add a mapping of `[start, start+count)` in the parent namespace
+    /// to `[end, end+count)` in the new child namespace.
     pub fn add(&mut self, start: u32, end: u32, count: u32) -> &mut Self {
         self.map.insert(start, (end, count));
         self
@@ -229,6 +260,7 @@ impl IdMap {
             .collect()
     }
 
+    /// Print the mapping in the format used by `/proc/<pid>/uid_map` and `/proc/<pid>/gid_map`
     fn map_file(&self) -> String {
         // emit mapping as lines
         //   start# end# count#\n
@@ -241,6 +273,7 @@ impl IdMap {
             })
     }
 
+    /// Apply the mapping to the target process.
     pub fn write(&self) -> Result<()> {
         let caps = util::Cap::current()?;
 

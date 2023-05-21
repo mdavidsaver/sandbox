@@ -1,8 +1,8 @@
 //! sandbox - Limited Linux containers
 //!
 //! Installs executables:
+//! - isolate  - Run command with (by default) only $PWD writable, and not network access.
 //! - hidehome - Run command with (apparently) empty $HOME
-//! - isolate  - Run command with only $PWD writable, and not network access.
 //! - nonet    - Run command with no network access
 
 mod err;

@@ -1,3 +1,5 @@
+//! Wrappers for UID and GID syscalls
+
 use libc;
 
 use super::err::{Error, Result};

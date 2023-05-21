@@ -18,11 +18,13 @@ use super::err::{Error, Result};
 pub use super::proc::*;
 pub use super::user::*;
 
+/// Allocate a `CString` from the given path.
 fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
     let ret = CString::new(path.as_ref().to_string_lossy().as_ref())?;
     Ok(ret)
 }
 
+/// Create a file, and write the provided bytes
 pub fn write_file<P: AsRef<Path>, S: AsRef<[u8]>>(name: P, buf: S) -> Result<()> {
     debug!("write_file({:?}, ...)", name.as_ref().display());
     let mut file = fs::OpenOptions::new()
@@ -34,12 +36,14 @@ pub fn write_file<P: AsRef<Path>, S: AsRef<[u8]>>(name: P, buf: S) -> Result<()>
         .map_err(|e| Error::file("write", name.as_ref(), e))
 }
 
+/// Wraps `mkdir()`.  Only attempts to create the leaf
 pub fn mkdir<S: AsRef<Path>>(name: S) -> Result<PathBuf> {
     debug!("mkdir({:?})", name.as_ref().display());
     fs::create_dir(name.as_ref()).map_err(|e| Error::file("mkdir", name.as_ref(), e))?;
     Ok(name.as_ref().to_path_buf())
 }
 
+/// `mkdir()` for the leaf directory and all parents.  eg. `install -d /some/dirs`.
 pub fn mkdirs<S: AsRef<Path>>(name: S) -> Result<PathBuf> {
     debug!("mkdirs({:?})", name.as_ref().display());
     fs::create_dir_all(name.as_ref()).map_err(|e| Error::file("mkdirs", name.as_ref(), e))?;
@@ -70,11 +74,13 @@ pub fn clonedirs<A: AsRef<Path>, B: AsRef<Path>>(src: A, target: B) -> Result<()
     Ok(())
 }
 
+/// Wraps `rmdir ...`
 pub fn rmdir<S: AsRef<Path>>(name: S) -> Result<()> {
     debug!("rmdir({:?})", name.as_ref().display());
     fs::remove_dir(name.as_ref()).map_err(|e| Error::file("rmdir", name.as_ref(), e))
 }
 
+/// Wraps `chown()`
 pub fn chown<S: AsRef<Path>>(path: S, uid: libc::uid_t, gid: libc::gid_t) -> Result<()> {
     debug!("chown({:?}, {}, {})", path.as_ref().display(), uid, gid);
     let rawname = path2cstr(&path)?;
@@ -87,6 +93,7 @@ pub fn chown<S: AsRef<Path>>(path: S, uid: libc::uid_t, gid: libc::gid_t) -> Res
     }
 }
 
+/// Wraps `chmod()`
 pub fn chmod<S: AsRef<Path>>(path: S, mode: u32) -> Result<()> {
     debug!("chmod({:?}, {:#o})", path.as_ref().display(), mode);
     let rawname = path2cstr(&path)?;
@@ -99,6 +106,7 @@ pub fn chmod<S: AsRef<Path>>(path: S, mode: u32) -> Result<()> {
     }
 }
 
+/// Create a pair of connected stream sockets.  Will be `SOCK_STREAM`.  May not actually be `AF_INET` or `AF_INET6`.
 pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
     let mut fds = vec![0, 2];
     unsafe {
@@ -112,6 +120,7 @@ pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
     }
 }
 
+/// Wraps `unshare()`
 pub fn unshare(flags: libc::c_int) -> Result<()> {
     debug!("unshare(0x{:x})", flags);
     unsafe {
@@ -122,6 +131,7 @@ pub fn unshare(flags: libc::c_int) -> Result<()> {
     Ok(())
 }
 
+/// Wraps `mount()`
 pub fn mount<A, B, C>(src: A, target: B, fstype: C, flags: libc::c_ulong) -> Result<()>
 where
     A: AsRef<Path>,
@@ -131,6 +141,7 @@ where
     mount_with_data(src, target, fstype, flags, "")
 }
 
+/// Wraps `mount()`
 pub fn mount_with_data<A, B, C, D>(
     src: A,
     target: B,
@@ -172,6 +183,8 @@ where
     Ok(())
 }
 
+/// Wraps `umount2(..., MNT_DETACH)` to remove a mount from the current namespace,
+/// but not necessarily from others.
 pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     debug!("umount({:?})", path.as_ref().display());
     let rawname = path2cstr(&path)?;
@@ -185,6 +198,7 @@ pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     }
 }
 
+/// Try to `umount_lazy()`
 pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
     debug!("umount({:?})", path.as_ref().display());
     let rawname = path2cstr(&path)?;
@@ -202,6 +216,7 @@ pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
     }
 }
 
+/// Wraps `pivot_root()`
 pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> Result<()> {
     debug!(
         "pivot_root({:?}, {:?})",
@@ -225,6 +240,7 @@ pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> R
     }
 }
 
+/// Maniplate the `O_CLOEXEC` bit on the provided file descriptor.
 pub fn set_cloexec<F: AsRawFd>(fd: F, v: bool) -> Result<()> {
     let fdn = fd.as_raw_fd();
     unsafe {

@@ -1,3 +1,5 @@
+//! Filesystem utilities...
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::{fmt, fs, rc};
@@ -24,6 +26,7 @@ macro_rules! path {
 
 /// Find the (parent) directory which is a mount point for this file/directory.
 ///
+/// Returns either the provided `path` or a parent.
 /// See src/find-mount-point.c in GNU coreutils
 pub fn find_mount_point<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     let path = path
@@ -56,7 +59,7 @@ pub fn find_mount_point<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
     }
 }
 
-// cf. Documentation/filesystems/proc.txt
+/// cf. `Documentation/filesystems/proc.txt` in the Linux kernel source tree.
 #[derive(Debug)]
 pub struct MountInfo {
     pub id: u64,
@@ -98,16 +101,19 @@ impl fmt::Display for MountInfo {
     }
 }
 
+/// A list of file system mount points
 #[derive(Debug)]
 pub struct Mounts {
     points: HashMap<PathBuf, rc::Rc<MountInfo>>,
 }
 
 impl Mounts {
+    /// Mount points in the namespace of the current process
     pub fn current() -> Result<Mounts> {
         Self::create(&"self")
     }
 
+    /// Mount points in the namespace of the specified PID
     pub fn from_pid(pid: libc::pid_t) -> Result<Mounts> {
         Self::create(pid.to_string())
     }
@@ -205,6 +211,7 @@ impl Mounts {
         })
     }
 
+    /// Lookup the mount point for the provided path, which need not be a mount point.
     pub fn lookup<P: AsRef<Path>>(&self, path: P) -> Result<rc::Rc<MountInfo>> {
         let mp = find_mount_point(path)?;
         self.points

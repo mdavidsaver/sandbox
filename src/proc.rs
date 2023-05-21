@@ -1,3 +1,5 @@
+//! Child process creation/handling
+
 use std::collections::HashMap;
 use std::{env, ffi, fmt, process};
 
@@ -18,6 +20,7 @@ pub struct Proc {
 }
 
 impl Proc {
+    /// Take up managment of an existing PID.
     pub fn manage(pid: libc::pid_t) -> Proc {
         assert!(pid > 0);
         Proc {
@@ -27,11 +30,12 @@ impl Proc {
         }
     }
 
+    /// PID of managed process
     pub fn id(&self) -> libc::pid_t {
         self.pid
     }
 
-    /// Send signal to process
+    /// Send signal to process.  eg. `libc::SIGINT`
     pub fn signal(&self, sig: libc::c_int) -> Result<()> {
         if !self.done {
             debug!("signal PID {} with {}", self.pid, sig);
@@ -47,13 +51,14 @@ impl Proc {
         Ok(())
     }
 
-    /// Send SIGKILL to process
+    /// Send `SIGKILL` to process
     pub fn kill(&self) -> Result<()> {
         self.signal(libc::SIGKILL)
     }
 
     /// Block current process until child exits.
-    ///
+    /// May be interrupted by `SIGINT`.
+    /// Returns process exit code.
     pub fn park(&mut self) -> Result<i32> {
         if self.done {
             return Ok(self.code);
@@ -127,7 +132,7 @@ pub enum TryWait {
     Done(libc::pid_t, i32),
 }
 
-/// Wraps waitpid()
+/// Wraps `waitpid()` with `WNOHANG` for polling
 pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait> {
     let mut sts = 0;
     unsafe {
@@ -142,6 +147,7 @@ pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait> {
     }
 }
 
+/// Configuration for a call to `execvpe()`
 pub struct Exec {
     cmd: ffi::CString,
     args: Vec<ffi::CString>,
@@ -149,6 +155,7 @@ pub struct Exec {
 }
 
 impl Exec {
+    /// Setup to exec the given `cmd` with the current process environment variables.
     pub fn new<T: AsRef<str>>(cmd: T) -> Result<Exec> {
         let mut es = HashMap::new();
 
@@ -167,6 +174,7 @@ impl Exec {
         })
     }
 
+    /// Provide command arguments
     pub fn args<I>(&mut self, args: I) -> Result<&mut Self>
     where
         I: IntoIterator,
@@ -178,11 +186,13 @@ impl Exec {
         Ok(self)
     }
 
+    /// Clear the set of environment variables to be passed to the child.
     pub fn env_clear(&mut self) -> &mut Self {
         self.env.clear();
         self
     }
 
+    /// Set an environment variable to be passed to the child.
     pub fn env<'a, T>(&mut self, name: T, value: T) -> Result<&mut Self>
     where
         T: Into<&'a str>,
@@ -192,11 +202,14 @@ impl Exec {
         Ok(self)
     }
 
+    /// Clear a single environment variable.
     pub fn env_remove<'a, T: Into<&'a str>>(&mut self, name: T) -> &mut Self {
         self.env.remove(name.into());
         self
     }
 
+    /// Make the `execvpe()` call.
+    /// On success, does not return.
     pub fn exec(&self) -> Result<()> {
         let cmd = self.cmd.as_ptr();
         let mut args: Vec<*const libc::c_char> = self.args.iter().map(|s| s.as_ptr()).collect();
@@ -216,6 +229,8 @@ impl Exec {
     }
 }
 
+/// `fork()` a child with the current process address map to run `act`.
+/// Returns only to the caller (parent process) with a `Proc` to manage the new child.
 pub fn fork<F, E>(act: F) -> Result<Proc>
 where
     F: FnOnce() -> std::result::Result<(), E>,

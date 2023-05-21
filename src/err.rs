@@ -1,3 +1,5 @@
+//! Internal error container
+
 use std::path::{Path, PathBuf};
 use std::{error, fmt, io};
 
