@@ -82,8 +82,6 @@ impl<'a> ContainerHooks for Isolate<'a> {
         // mount --rbind / /tmp/.../root
         util::mount("/", &new_root, "", libc::MS_BIND | libc::MS_REC)?;
 
-        //util::Exec::new("bash")?.exec()?;
-
         // disconnect some FS we definately won't use (if they are mount points)
         util::umount_lazy(&new_proc)?;
         util::maybe_umount_lazy(&new_devshm)?;
