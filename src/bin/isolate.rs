@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::{env, process};
 
@@ -13,13 +14,18 @@ use sandbox::{runc, Error};
 const NOOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID | libc::MS_RELATIME;
 const TMPOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOSUID | libc::MS_RELATIME;
 
+#[derive(Debug)]
+enum MountType {
+    ReadOnly,
+    Writable,
+}
+
 struct Isolate<'a> {
     isuser: bool,
     allownet: bool,
     args: Vec<String>,
     tdir: &'a Path,
-    writable: Vec<PathBuf>,
-    readonly: Vec<PathBuf>,
+    mounts: Vec<(MountType, PathBuf)>,
     cwd: PathBuf,
     bridge: std::cell::Cell<Option<net::Bridge>>,
 }
@@ -129,41 +135,40 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("none", &new_devshm, "tmpfs", NOOPT)?;
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", TMPOPT)?;
 
-        // bind writable
-        for wdir in &self.writable {
-            let tdir = path!(&new_root, wdir.strip_prefix("/")?);
-            log::debug!("Make Requested RW: {}", wdir.display());
+        // user binds
+        for (mtype, dir) in &self.mounts {
+            let tdir = path!(&new_root, dir.strip_prefix("/")?);
+            log::debug!("Bind as {mtype:?}: {}", dir.display());
 
-            if tdir.exists() {
-                // nothing to do
-            } else if tdir.starts_with("/tmp") {
-                util::clonedirs(&wdir, &new_root)?;
-            } else {
-                log::error!("PWD in unallowed location");
+            match mtype {
+                MountType::ReadOnly => {
+                    // creating a RO bind mount is a two step process.
+                    // first create a normal bind mount (rw vs. ro depends on parent mount)
+                    util::mount(&dir, &tdir, "", libc::MS_BIND)?;
+
+                    // now do a re-mount as RO.
+                    // must look up mount info each time.
+                    let opts = Mounts::current()?.lookup(&tdir)?.options;
+
+                    util::mount(
+                        "",
+                        &tdir,
+                        "",
+                        opts | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
+                    )?;
+                }
+                MountType::Writable => {
+                    if tdir.exists() {
+                        // nothing to do
+                    } else if tdir.starts_with("/tmp") {
+                        util::clonedirs(&dir, &new_root)?;
+                    } else {
+                        log::error!("PWD in unallowed location");
+                    }
+
+                    util::mount(&dir, tdir, "", libc::MS_BIND)?;
+                }
             }
-
-            util::mount(&wdir, tdir, "", libc::MS_BIND)?;
-        }
-
-        // bind read-only
-        for rdir in &self.readonly {
-            let tdir = path!(&new_root, rdir.strip_prefix("/")?);
-            log::debug!("Make Requested RO: {}", rdir.display());
-
-            // creating a RO bind mount is a two step process.
-            // first create a normal bind mount (rw vs. ro depends on parent mount)
-            util::mount(&rdir, &tdir, "", libc::MS_BIND)?;
-
-            // now do a re-mount as RO.
-            // must look up mount info each time.
-            let opts = Mounts::current()?.lookup(&tdir)?.options;
-
-            util::mount(
-                "",
-                &tdir,
-                "",
-                opts | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_BIND,
-            )?;
         }
 
         log::debug!("Switch to new root");
@@ -210,7 +215,7 @@ will be writable, with no network access allowed.
 Options:
     -h             - Show this message
     -N --net       - Allow network access
-    -c --no-pwd    - Deny writes to $PWD
+    -c --no-pwd    - Deny writes to $PWD  (shorthand for \"-O .\")
     -W --rw <dir>  - Allow writes to part of the directory tree
     -O --ro <dir>  - Deny writes to part of the directory tree
 
@@ -232,15 +237,10 @@ fn main() -> Result<(), Error> {
 
     let mut iargs = env::args().skip(1).peekable();
     let mut allownet = false;
-    let mut writable = vec![];
-    let mut readonly = Vec::new();
-    let mut writepwd = true;
+    let mut mounts = vec![];
 
-    let add_path = |paths: &mut Vec<PathBuf>, path: &PathBuf| match (&cwd).join(path).canonicalize()
-    {
-        Ok(p) => paths.push(p),
-        Err(e) => log::warn!("Ignore: {} : {}", path.display(), e),
-    };
+    // order first, so the any subsequent -O ./whatever take precedence
+    mounts.push((MountType::Writable, cwd.clone()));
 
     while let Some(arg) = iargs.peek() {
         if !arg.starts_with("-") {
@@ -251,17 +251,23 @@ fn main() -> Result<(), Error> {
         if arg == "-n" || arg == "-N" || arg == "--net" {
             allownet = true;
         } else if arg == "-c" || arg == "--no-pwd" {
-            writepwd = false;
-        } else if arg == "-W" || arg == "--rw" {
-            add_path(
-                &mut writable,
-                &PathBuf::from(iargs.next().expect("-W/--rw expects argument")),
-            );
-        } else if arg == "-O" || arg == "--ro" {
-            add_path(
-                &mut readonly,
-                &PathBuf::from(iargs.next().expect("-O/--ro expects argument")),
-            );
+            mounts.push((MountType::ReadOnly, cwd.clone()));
+        } else if arg == "-W" || arg == "--rw" || arg == "-O" || arg == "--ro" {
+            let mtype = if arg == "-O" || arg == "--ro" {
+                MountType::ReadOnly
+            } else {
+                MountType::Writable
+            };
+
+            let dir: PathBuf = iargs
+                .next()
+                .expect(&format!("{arg} expects argument"))
+                .into();
+            if dir.is_dir() {
+                mounts.push((mtype, dir.canonicalize()?));
+            } else {
+                log::warn!("Ignore non-existant directory: {arg} {}", dir.display());
+            }
         } else if arg == "-h" {
             usage();
             return Ok(());
@@ -272,15 +278,25 @@ fn main() -> Result<(), Error> {
         }
     }
 
+    // remove duplicates in favor of last
+    let mounts = {
+        let mut mseen = HashSet::new();
+        let mut munique = vec![];
+        for (mtype, dir) in mounts.into_iter() {
+            if mseen.contains(&dir) {
+                munique = munique.into_iter().filter(|(_, d)| d != &dir).collect();
+            }
+            mseen.insert(dir.clone());
+            munique.push((mtype, dir));
+        }
+        munique
+    };
+
     let rawargs = iargs.collect::<Vec<String>>();
 
     if rawargs.len() == 0 {
         usage();
         process::exit(1);
-    }
-
-    if writepwd {
-        add_path(&mut writable, &cwd);
     }
 
     let tdir = TempDir::new()?;
@@ -291,8 +307,7 @@ fn main() -> Result<(), Error> {
         allownet,
         args: rawargs,
         tdir: tdir.path(),
-        writable,
-        readonly,
+        mounts,
         cwd: env::current_dir()?,
         bridge: std::cell::Cell::new(None),
     };
