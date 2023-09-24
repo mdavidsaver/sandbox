@@ -13,7 +13,6 @@ use libc;
 use log::debug;
 
 pub use super::capability::*;
-pub use super::container::*;
 use super::err::{Error, Result};
 pub use super::proc::*;
 pub use super::user::*;

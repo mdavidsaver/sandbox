@@ -147,7 +147,7 @@ impl IfConfig {
         let iaddr = b2u32(addr.octets());
         let mut req = IfReq::from_name(ifname)?;
         unsafe {
-            let mut inaddr = &mut req.ifr_ifru.ifru_addr as *mut _ as *mut libc::sockaddr_in;
+            let inaddr = &mut req.ifr_ifru.ifru_addr as *mut _ as *mut libc::sockaddr_in;
             (*inaddr).sin_family = libc::AF_INET as libc::sa_family_t;
             (*inaddr).sin_port = 0;
             (*inaddr).sin_addr.s_addr = iaddr;
