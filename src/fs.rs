@@ -115,13 +115,11 @@ impl Mounts {
 
     /// Mount points in the namespace of the specified PID
     pub fn from_pid(pid: libc::pid_t) -> Result<Mounts> {
-        Self::create(pid.to_string())
+        Self::create(pid.to_string().as_str())
     }
 
-    fn create<S: AsRef<str>>(pid: S) -> Result<Mounts> {
-        let mut fname = PathBuf::from("/proc");
-        fname.push(pid.as_ref());
-        fname.push("mountinfo");
+    fn create(pid: &str) -> Result<Mounts> {
+        let fname: PathBuf = [&"/proc", pid, "mountinfo"].iter().collect();
 
         let contents = fs::read_to_string(&fname).map_err(|e| Error::file("open", &fname, e))?;
 
@@ -181,11 +179,11 @@ impl Mounts {
             infos.insert(
                 id,
                 rc::Rc::new(MountInfo {
-                    id: id,
+                    id,
                     parent: None, // placeholder
                     root: parts[3].into(),
                     mount_point: parts[4].into(),
-                    options: options,
+                    options,
                     fstype: parts[sepidx + 1].to_string(),
                     source: parts[sepidx + 2].to_string(),
                 }),

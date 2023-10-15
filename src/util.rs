@@ -26,12 +26,12 @@ fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
 /// Create a file, and write the provided bytes
 pub fn write_file<P: AsRef<Path>, S: AsRef<[u8]>>(name: P, buf: S) -> Result<()> {
     debug!("write_file({:?}, ...)", name.as_ref().display());
-    let mut file = fs::OpenOptions::new()
+    fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(name.as_ref())
-        .map_err(|e| Error::file("open", name.as_ref(), e))?;
-    file.write_all(buf.as_ref())
+        .map_err(|e| Error::file("open", name.as_ref(), e))?
+        .write_all(buf.as_ref())
         .map_err(|e| Error::file("write", name.as_ref(), e))
 }
 
@@ -270,6 +270,8 @@ mod tests {
         let (mut a, mut b) = socketpair().expect("socketpair");
         a.set_nonblocking(true).unwrap();
         b.set_nonblocking(true).unwrap();
+        set_cloexec(a.as_raw_fd(), true).unwrap();
+        set_cloexec(b.as_raw_fd(), true).unwrap();
 
         a.write_all("msg".as_bytes()).unwrap();
         let mut buf = vec![0; 4];
