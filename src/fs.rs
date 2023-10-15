@@ -6,7 +6,7 @@ use std::{fmt, fs};
 
 use std::os::unix::fs::MetadataExt;
 
-use log::warn;
+use log::{debug, warn};
 
 use super::err::{Error, Result};
 
@@ -110,11 +110,72 @@ impl Mounts {
         Self::create(pid.to_string().as_str())
     }
 
+    fn parse_line(line: &str) -> Result<MountInfo> {
+        let mut liter = line.split_ascii_whitespace().peekable();
+
+        // cf. Documentation/filesystems/proc.rst
+        // lines like:
+        // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
+        // (0)(1)(2)   (3)   (4)      (5)      (6)   (7) (8)   (9)          (10)
+        // where (6) may be repeated zero or more times.
+        let id = liter.next().ok_or(Error::BadStr)?.parse::<_>()?;
+        let _parent_id = liter.next().ok_or(Error::BadStr)?;
+        let _dev = liter.next().ok_or(Error::BadStr)?;
+        let root = liter.next().ok_or(Error::BadStr)?.into();
+        let mount_point = liter.next().ok_or(Error::BadStr)?.into();
+        let opts = liter.next().ok_or(Error::BadStr)?;
+        while liter.peek().is_some_and(|p| p != &"-") {
+            // ignore optional fields
+            liter.next().unwrap();
+        }
+        let sep = liter.next().ok_or(Error::BadStr)?;
+        debug_assert_eq!(sep, "-");
+        let fstype = liter.next().ok_or(Error::BadStr)?.into();
+        let source = liter.next().ok_or(Error::BadStr)?.into();
+        let _sopts = liter.next().ok_or(Error::BadStr)?;
+        if liter.peek().is_some() {
+            debug!("Ignoring extra mountinfo {:?}", line);
+        }
+
+        let mut options = 0;
+        for opt in opts.split(',') {
+            match opt {
+                // cf. 'man 8 mount' and 'man 2 mount'
+                "ro" => options |= libc::MS_RDONLY,
+                "rw" => (),
+                "noexec" => options |= libc::MS_NOEXEC,
+                "nosuid" => options |= libc::MS_NOSUID,
+                "nodev" => options |= libc::MS_NODEV,
+                "noatime" => options |= libc::MS_NOATIME,
+                "nodiratime" => options |= libc::MS_NODIRATIME,
+                "relatime" => options |= libc::MS_RELATIME,
+                "strictatime" => options |= libc::MS_STRICTATIME,
+                _ => warn!("For {:?} ignore unknown option {:?}", opts, opt),
+            }
+        }
+
+        Ok(MountInfo {
+            id,
+            // parent id
+            // dev
+            root,
+            mount_point,
+            options,
+            // options fields
+            fstype,
+            source,
+            // super options
+        })
+    }
+
     fn create(pid: &str) -> Result<Mounts> {
         let fname: PathBuf = [&"/proc", pid, "mountinfo"].iter().collect();
 
         let contents = fs::read_to_string(&fname).map_err(|e| Error::file("open", &fname, e))?;
+        Self::parse(&contents, &fname)
+    }
 
+    fn parse(contents: &str, fname: &Path) -> Result<Mounts> {
         let lines: Vec<&str> = contents.lines().collect();
 
         // lines like:
@@ -128,62 +189,18 @@ impl Mounts {
         let mut infos = HashMap::new();
 
         for (lino, line) in lines.into_iter().enumerate() {
-            let parts: Vec<&str> = line.split(' ').collect();
-            if parts.len() < 10 {
-                return Err(Error::parse(
-                    format!("Syntax on Line {} : \"{}\"", lino + 1, &line),
-                    &fname,
-                ));
-            }
-
-            // find index of '-'
-            let (sepidx, _) = parts
-                .iter()
-                .enumerate()
-                .find(|(_, e)| &&"-" == e)
-                .ok_or_else(|| Error::parse(format!("Missing sep in \"{}\"", &line), &fname))?;
-
-            let id = parts[0].parse::<u64>()?;
-
-            let options = {
-                let mut options = 0;
-                for opt in parts[5].split(',') {
-                    match opt {
-                        // cf. 'man 8 mount' and 'man 2 mount'
-                        "ro" => options |= libc::MS_RDONLY,
-                        "rw" => (),
-                        "noexec" => options |= libc::MS_NOEXEC,
-                        "nosuid" => options |= libc::MS_NOSUID,
-                        "nodev" => options |= libc::MS_NODEV,
-                        "noatime" => options |= libc::MS_NOATIME,
-                        "nodiratime" => options |= libc::MS_NODIRATIME,
-                        "relatime" => options |= libc::MS_RELATIME,
-                        "strictatime" => options |= libc::MS_STRICTATIME,
-                        _ => warn!("For {} ignore unknown option {}", parts[4], opt),
-                    }
-                }
-                options
-            };
-
-            infos.insert(
-                id,
-                MountInfo {
-                    id,
-                    root: parts[3].into(),
-                    mount_point: parts[4].into(),
-                    options,
-                    fstype: parts[sepidx + 1].to_string(),
-                    source: parts[sepidx + 2].to_string(),
-                },
-            );
+            let info = Self::parse_line(line).map_err(|_| {
+                Error::parse(format!("Error parsing line {} : {:?}", lino, line), &fname)
+            })?;
+            let key = info.mount_point.clone();
+            infos.insert(key, info);
         }
 
-        Ok(Mounts {
-            points: infos
-                .drain()
-                .map(|(_id, mount)| (mount.mount_point.clone(), mount))
-                .collect(),
-        })
+        if infos.is_empty() {
+            Err(Error::MissingMount)?;
+        }
+
+        Ok(Mounts { points: infos })
     }
 
     /// Lookup the mount point for the provided path, which need not be a mount point.
@@ -227,8 +244,20 @@ mod tests {
     }
 
     #[test]
-    fn test_mountinfo() {
+    fn test_mountinfo_self() {
         let infos = Mounts::current().unwrap();
         let root = infos.lookup(&"/").unwrap();
+        assert_eq!(root.mount_point.display().to_string(), "/");
+    }
+
+    #[test]
+    fn test_mountinfo_static() {
+        let inp = "
+22 29 0:20 / /sys rw,nosuid,nodev,noexec,relatime shared:7 - sysfs sysfs rw
+29 1 253:1 / / rw,noatime shared:1 - ext4 /dev/mapper/local-root rw,errors=remount-ro
+".trim_start();
+        let infos = Mounts::parse(inp, &PathBuf::from(&"static")).unwrap();
+        assert_eq!("sysfs", infos.lookup(&"/sys").unwrap().fstype);
+        assert_eq!("ext4", infos.lookup(&"/").unwrap().fstype);
     }
 }
