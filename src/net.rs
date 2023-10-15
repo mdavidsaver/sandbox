@@ -95,23 +95,23 @@ impl IfConfig {
     /// Map network interface name to numeric index
     pub fn ifindex<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
-        unsafe {
+        let ret = unsafe {
             req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFINDEX)?;
-            let ret = req.ifr_ifru.ifru_ivalue as u32;
-            log::debug!("ifindex({:?}) -> {}", ifname.as_ref(), ret);
-            Ok(ret)
-        }
+            req.ifr_ifru.ifru_ivalue as u32
+        };
+        log::debug!("ifindex({:?}) -> {}", ifname.as_ref(), ret);
+        Ok(ret)
     }
 
     /// Lookup interface flags bit mask
     pub fn ifflags<S: AsRef<str>>(&self, ifname: S) -> Result<u32> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
-        unsafe {
+        let ret = unsafe {
             req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFFLAGS)?;
-            let ret = req.ifr_ifru.ifru_flags as u32;
-            log::debug!("ifflags({:?}) -> {}", ifname.as_ref(), ret);
-            Ok(ret)
-        }
+            req.ifr_ifru.ifru_flags as u32
+        };
+        log::debug!("ifflags({:?}) -> {}", ifname.as_ref(), ret);
+        Ok(ret)
     }
 
     /// Overwrite interface flags bit mask
@@ -129,16 +129,17 @@ impl IfConfig {
     /// Unspecified (as in I don't know) how this behaves when more than one IPv4 address is assigned.
     pub fn address<S: AsRef<str>>(&self, ifname: S) -> Result<net::Ipv4Addr> {
         let mut req = IfReq::from_name(ifname.as_ref())?;
-        unsafe {
+        let saddr = unsafe {
             req.ioctl(self.0.as_raw_fd(), ext::SIOCGIFADDR)?;
             if req.ifr_ifru.ifru_addr.sa_family != libc::AF_INET as libc::sa_family_t {
                 Err(Error::NotIPv4)?;
             }
             let inaddr = &req.ifr_ifru.ifru_addr as *const _ as *const libc::sockaddr_in;
-            let ret = net::Ipv4Addr::from(u32::from_be((*inaddr).sin_addr.s_addr));
-            log::debug!("address({:?}) -> {}", ifname.as_ref(), ret);
-            Ok(ret)
-        }
+            (*inaddr).sin_addr.s_addr
+        };
+        let ret = net::Ipv4Addr::from(u32::from_be(saddr));
+        log::debug!("address({:?}) -> {}", ifname.as_ref(), ret);
+        Ok(ret)
     }
 
     /// Set "the" IPv4 address of the named interface.
@@ -163,8 +164,8 @@ impl IfConfig {
         unsafe {
             // only the interface name is used
             req.ioctl(self.0.as_raw_fd(), ext::SIOCBRADDBR)?;
-            Ok(())
         }
+        Ok(())
     }
 
     /// Add an interface to a soft ethernet bridge
@@ -180,8 +181,8 @@ impl IfConfig {
         req.ifr_ifru.ifru_ivalue = index as _;
         unsafe {
             req.ioctl(self.0.as_raw_fd(), ext::SIOCBRADDIF)?;
-            Ok(())
         }
+        Ok(())
     }
 }
 

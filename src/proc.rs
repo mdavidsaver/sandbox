@@ -135,15 +135,13 @@ pub enum TryWait {
 /// Wraps `waitpid()` with `WNOHANG` for polling
 pub fn trywaitpid(pid: libc::pid_t) -> Result<TryWait> {
     let mut sts = 0;
-    unsafe {
-        let ret = libc::waitpid(pid, &mut sts, libc::WNOHANG);
-        if ret == -1 {
-            Err(Error::last_os_error(format!("waitpid({})", pid)))
-        } else if ret == 0 {
-            Ok(TryWait::Busy)
-        } else {
-            Ok(TryWait::Done(ret, libc::WEXITSTATUS(sts)))
-        }
+    let ret = unsafe { libc::waitpid(pid, &mut sts, libc::WNOHANG) };
+    if ret == -1 {
+        Err(Error::last_os_error(format!("waitpid({})", pid)))
+    } else if ret == 0 {
+        Ok(TryWait::Busy)
+    } else {
+        Ok(TryWait::Done(ret, libc::WEXITSTATUS(sts)))
     }
 }
 

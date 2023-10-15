@@ -18,9 +18,14 @@ pub use super::proc::*;
 pub use super::user::*;
 
 /// Allocate a `CString` from the given path.
-fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
-    let ret = CString::new(path.as_ref().to_string_lossy().as_ref())?;
+fn str2cstr<S: AsRef<str>>(s: S) -> Result<CString> {
+    let ret = CString::new(s.as_ref())?;
     Ok(ret)
+}
+
+/// Allocate a `CString` from the given path.
+fn path2cstr<P: AsRef<Path>>(path: P) -> Result<CString> {
+    str2cstr(path.as_ref().to_string_lossy())
 }
 
 /// Create a file, and write the provided bytes
@@ -82,26 +87,20 @@ pub fn rmdir<S: AsRef<Path>>(name: S) -> Result<()> {
 /// Wraps `chown()`
 pub fn chown<S: AsRef<Path>>(path: S, uid: libc::uid_t, gid: libc::gid_t) -> Result<()> {
     debug!("chown({:?}, {}, {})", path.as_ref().display(), uid, gid);
-    let rawname = path2cstr(&path)?;
-    unsafe {
-        if libc::chown(rawname.as_ptr(), uid, gid) == 0 {
-            Ok(())
-        } else {
-            Err(Error::last_file_error("chown", path))
-        }
+    if unsafe { libc::chown(path2cstr(&path)?.as_ptr(), uid, gid) } == 0 {
+        Ok(())
+    } else {
+        Err(Error::last_file_error("chown", path))
     }
 }
 
 /// Wraps `chmod()`
 pub fn chmod<S: AsRef<Path>>(path: S, mode: u32) -> Result<()> {
     debug!("chmod({:?}, {:#o})", path.as_ref().display(), mode);
-    let rawname = path2cstr(&path)?;
-    unsafe {
-        if libc::chmod(rawname.as_ptr(), mode as libc::mode_t) == 0 {
-            Ok(())
-        } else {
-            Err(Error::last_file_error("chmod", path))
-        }
+    if unsafe { libc::chmod(path2cstr(&path)?.as_ptr(), mode as libc::mode_t) } == 0 {
+        Ok(())
+    } else {
+        Err(Error::last_file_error("chmod", path))
     }
 }
 
@@ -122,10 +121,8 @@ pub fn socketpair() -> Result<(TcpStream, TcpStream)> {
 /// Wraps `unshare()`
 pub fn unshare(flags: libc::c_int) -> Result<()> {
     debug!("unshare(0x{:x})", flags);
-    unsafe {
-        if libc::unshare(flags) != 0 {
-            return Err(Error::last_os_error("unshare"));
-        }
+    if unsafe { libc::unshare(flags) } != 0 {
+        return Err(Error::last_os_error("unshare"));
     }
     Ok(())
 }
@@ -135,7 +132,7 @@ pub fn mount<A, B, C>(src: A, target: B, fstype: C, flags: libc::c_ulong) -> Res
 where
     A: AsRef<Path>,
     B: AsRef<Path>,
-    C: AsRef<Path>,
+    C: AsRef<str>,
 {
     mount_with_data(src, target, fstype, flags, "")
 }
@@ -151,33 +148,33 @@ pub fn mount_with_data<A, B, C, D>(
 where
     A: AsRef<Path>,
     B: AsRef<Path>,
-    C: AsRef<Path>,
-    D: AsRef<Path>,
+    C: AsRef<str>,
+    D: AsRef<str>,
 {
-    let csrc = path2cstr(&src)?;
-    let ctarget = path2cstr(&target)?;
-    let cfstype = path2cstr(&fstype)?;
-    let cdata = path2cstr(&data)?;
     debug!(
         "mount({:?},{:?},{:?},0x{:x},{:?})",
-        csrc, ctarget, cfstype, flags, cdata
+        src.as_ref().display(),
+        target.as_ref().display(),
+        fstype.as_ref(),
+        flags,
+        data.as_ref()
     );
-    unsafe {
-        if 0 != libc::mount(
-            csrc.as_ptr() as *const libc::c_char,
-            ctarget.as_ptr() as *const libc::c_char,
-            cfstype.as_ptr() as *const libc::c_char,
+    if 0 != unsafe {
+        libc::mount(
+            path2cstr(&src)?.as_ptr(),
+            path2cstr(&target)?.as_ptr(),
+            str2cstr(&fstype)?.as_ptr() as *const _,
             flags,
-            cdata.as_ptr() as *const libc::c_void,
-        ) {
-            Err(Error::last_os_error(format!(
-                "mount src={:?} target={:?} fs={:?} flags=0x{:x} data=",
-                src.as_ref(),
-                target.as_ref(),
-                fstype.as_ref(),
-                flags
-            )))?;
-        }
+            str2cstr(&data)?.as_ptr() as *const _,
+        )
+    } {
+        Err(Error::last_os_error(format!(
+            "mount src={:?} target={:?} fs={:?} flags=0x{:x} data=",
+            src.as_ref(),
+            target.as_ref(),
+            fstype.as_ref(),
+            flags
+        )))?;
     }
     Ok(())
 }
@@ -186,33 +183,34 @@ where
 /// but not necessarily from others.
 pub fn umount_lazy<P: AsRef<Path>>(path: P) -> Result<()> {
     debug!("umount({:?})", path.as_ref().display());
-    let rawname = path2cstr(&path)?;
-    unsafe {
-        let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
-        if ret == 0 {
-            Ok(())
-        } else {
-            Err(Error::last_file_error("umount2", path))
-        }
+    let ret = unsafe { libc::umount2(path2cstr(&path)?.as_ptr(), libc::MNT_DETACH) };
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(Error::last_file_error("umount2", path))
     }
 }
 
 /// Try to `umount_lazy()`
 pub fn maybe_umount_lazy<P: AsRef<Path>>(path: P) -> Result<bool> {
     debug!("umount({:?})", path.as_ref().display());
-    let rawname = path2cstr(&path)?;
-    unsafe {
-        let ret = libc::umount2(rawname.as_ptr(), libc::MNT_DETACH);
-        if ret == 0 {
-            debug!("  Success");
-            Ok(true)
-        } else if std::io::Error::last_os_error().raw_os_error().unwrap() == libc::EINVAL {
-            debug!("  Nope");
-            Ok(false)
-        } else {
-            Err(Error::last_file_error("umount2", path))
-        }
+    let ret = unsafe { libc::umount2(path2cstr(&path)?.as_ptr(), libc::MNT_DETACH) };
+    if ret == 0 {
+        debug!("  Success");
+        Ok(true)
+    } else if std::io::Error::last_os_error().raw_os_error().unwrap() == libc::EINVAL {
+        debug!("  Nope");
+        Ok(false)
+    } else {
+        Err(Error::last_file_error("umount2", path))
     }
+}
+
+unsafe fn sys_pivot_root(
+    new_root: *const libc::c_char,
+    old_root: *const libc::c_char,
+) -> libc::c_int {
+    libc::syscall(libc::SYS_pivot_root, new_root, old_root) as _
 }
 
 /// Wraps `pivot_root()`
@@ -222,40 +220,35 @@ pub fn pivot_root<A: AsRef<Path>, B: AsRef<Path>>(new_root: A, old_root: B) -> R
         new_root.as_ref().display(),
         old_root.as_ref().display()
     );
-    let rawnew = path2cstr(&new_root)?;
-    let rawold = path2cstr(&old_root)?;
-    unsafe {
-        // no libc wrapper
-        let ret = libc::syscall(
-            libc::SYS_pivot_root,
-            rawnew.as_ptr() as *const libc::c_char,
-            rawold.as_ptr() as *const libc::c_char,
-        );
-        if ret == 0 {
-            Ok(())
-        } else {
-            Err(Error::last_file_error("pivot_root", new_root))
-        }
+    // no libc wrapper
+    let ret = unsafe {
+        sys_pivot_root(
+            path2cstr(&new_root)?.as_ptr(),
+            path2cstr(&old_root)?.as_ptr(),
+        )
+    };
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(Error::last_file_error("pivot_root", new_root))
     }
 }
 
 /// Maniplate the `O_CLOEXEC` bit on the provided file descriptor.
 pub fn set_cloexec<F: AsRawFd>(fd: F, v: bool) -> Result<()> {
     let fdn = fd.as_raw_fd();
-    unsafe {
-        let mut cur = libc::fcntl(fdn, libc::F_GETFD);
-        if cur < 0 {
-            return Err(Error::last_os_error("F_GETFD"));
-        }
-        if v {
-            cur |= libc::O_CLOEXEC;
-        } else {
-            cur &= !libc::O_CLOEXEC;
-        }
-        let err = libc::fcntl(fdn, libc::F_SETFD, cur);
-        if err < 0 {
-            return Err(Error::last_os_error("F_SETFD"));
-        }
+    let mut cur = unsafe { libc::fcntl(fdn, libc::F_GETFD) };
+    if cur < 0 {
+        return Err(Error::last_os_error("F_GETFD"));
+    }
+    if v {
+        cur |= libc::O_CLOEXEC;
+    } else {
+        cur &= !libc::O_CLOEXEC;
+    }
+    let err = unsafe { libc::fcntl(fdn, libc::F_SETFD, cur) };
+    if err < 0 {
+        return Err(Error::last_os_error("F_SETFD"));
     }
     Ok(())
 }
