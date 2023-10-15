@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs, rc};
+use std::{fmt, fs};
 
 use std::os::unix::fs::MetadataExt;
 
@@ -63,7 +63,7 @@ pub fn find_mount_point<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
 #[derive(Debug)]
 pub struct MountInfo {
     pub id: u64,
-    pub parent: Option<rc::Rc<MountInfo>>,
+    // parent
     // major:minor
     pub root: PathBuf,
     pub mount_point: PathBuf,
@@ -76,10 +76,6 @@ pub struct MountInfo {
 }
 
 impl MountInfo {
-    pub fn is_root(&self) -> bool {
-        return self.mount_point == Path::new("/") && self.parent.is_none();
-    }
-
     pub fn has_option(&self, opt: libc::c_ulong) -> bool {
         0 != (self.options & opt)
     }
@@ -89,12 +85,8 @@ impl fmt::Display for MountInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "mount={} parent={} fstype={} source={}",
+            "mount={} fstype={} source={}",
             self.mount_point.display(),
-            self.parent
-                .as_ref()
-                .map_or(&self.mount_point.clone(), |p| &p.mount_point)
-                .display(),
             self.fstype,
             self.source
         )
@@ -104,7 +96,7 @@ impl fmt::Display for MountInfo {
 /// A list of file system mount points
 #[derive(Debug)]
 pub struct Mounts {
-    points: HashMap<PathBuf, rc::Rc<MountInfo>>,
+    points: HashMap<PathBuf, MountInfo>,
 }
 
 impl Mounts {
@@ -134,7 +126,6 @@ impl Mounts {
         // so we pass ignore parents on first pass
 
         let mut infos = HashMap::new();
-        let mut parents = HashMap::new();
 
         for (lino, line) in lines.into_iter().enumerate() {
             let parts: Vec<&str> = line.split(' ').collect();
@@ -153,8 +144,6 @@ impl Mounts {
                 .ok_or_else(|| Error::parse(format!("Missing sep in \"{}\"", &line), &fname))?;
 
             let id = parts[0].parse::<u64>()?;
-
-            parents.insert(id, parts[1].parse::<u64>()?);
 
             let options = {
                 let mut options = 0;
@@ -178,27 +167,15 @@ impl Mounts {
 
             infos.insert(
                 id,
-                rc::Rc::new(MountInfo {
+                MountInfo {
                     id,
-                    parent: None, // placeholder
                     root: parts[3].into(),
                     mount_point: parts[4].into(),
                     options,
                     fstype: parts[sepidx + 1].to_string(),
                     source: parts[sepidx + 2].to_string(),
-                }),
+                },
             );
-        }
-
-        for (id, mount) in infos.iter() {
-            let parent = parents
-                .get(id)
-                .and_then(|parid| infos.get(parid).map(|i| i.clone()));
-            unsafe {
-                // the tree is under our exclusive control while populating
-                let cheat = mount.as_ref() as *const MountInfo as *mut MountInfo;
-                (*cheat).parent = parent;
-            }
         }
 
         Ok(Mounts {
@@ -210,19 +187,16 @@ impl Mounts {
     }
 
     /// Lookup the mount point for the provided path, which need not be a mount point.
-    pub fn lookup<P: AsRef<Path>>(&self, path: P) -> Result<rc::Rc<MountInfo>> {
+    pub fn lookup<P: AsRef<Path>>(&self, path: P) -> Result<&MountInfo> {
         let mp = find_mount_point(path)?;
-        self.points
-            .get(&mp)
-            .map(|info| info.clone())
-            .ok_or_else(|| Error::MissingMount {})
+        self.points.get(&mp).ok_or_else(|| Error::MissingMount {})
     }
 }
 
 impl<'a> IntoIterator for &'a Mounts {
-    type Item = &'a rc::Rc<MountInfo>;
+    type Item = &'a MountInfo;
     // oh for decltype()
-    type IntoIter = std::collections::hash_map::Values<'a, PathBuf, rc::Rc<MountInfo>>;
+    type IntoIter = std::collections::hash_map::Values<'a, PathBuf, MountInfo>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.points.values()
@@ -256,17 +230,5 @@ mod tests {
     fn test_mountinfo() {
         let infos = Mounts::current().unwrap();
         let root = infos.lookup(&"/").unwrap();
-        assert!(root.parent.is_none(), "{:?}", infos);
-
-        for mp in &infos {
-            let noroot = mp.mount_point != Path::new("/") || mp.parent.is_some();
-            assert!(
-                mp.is_root() || noroot,
-                "{:?} {} {}",
-                mp,
-                mp.is_root(),
-                noroot
-            );
-        }
     }
 }
