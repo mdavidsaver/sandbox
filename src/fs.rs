@@ -255,7 +255,8 @@ mod tests {
         let inp = "
 22 29 0:20 / /sys rw,nosuid,nodev,noexec,relatime shared:7 - sysfs sysfs rw
 29 1 253:1 / / rw,noatime shared:1 - ext4 /dev/mapper/local-root rw,errors=remount-ro
-".trim_start();
+"
+        .trim_start();
         let infos = Mounts::parse(inp, &PathBuf::from(&"static")).unwrap();
         assert_eq!("sysfs", infos.lookup(&"/sys").unwrap().fstype);
         assert_eq!("ext4", infos.lookup(&"/").unwrap().fstype);

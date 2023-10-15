@@ -272,4 +272,10 @@ mod tests {
         assert_eq!(n, 3);
         assert_eq!(&buf[0..3], "msg".as_bytes());
     }
+
+    #[test]
+    fn test_cstr() {
+        let cstr = path2cstr("/some/path").unwrap();
+        assert_eq!(cstr.to_str().unwrap(), "/some/path");
+    }
 }
