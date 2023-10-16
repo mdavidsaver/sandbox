@@ -8,14 +8,14 @@ pub use super::ext::CAP_SYS_ADMIN;
 
 use super::err::{Error, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Cap {
-    pub effective: Vec<u32>,
-    pub permitted: Vec<u32>,
-    pub inheritable: Vec<u32>,
+    pub effective: [u32; DATA_SIZE],
+    pub permitted: [u32; DATA_SIZE],
+    pub inheritable: [u32; DATA_SIZE],
 }
 
-const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as usize;
+const DATA_SIZE: usize = ext::_LINUX_CAPABILITY_U32S_3 as _;
 
 fn empty_data() -> ext::__user_cap_data_struct {
     ext::__user_cap_data_struct::default()
@@ -40,11 +40,7 @@ impl Cap {
             return Err(Error::last_os_error("capget"));
         }
 
-        let mut ret = Cap {
-            effective: vec![0; DATA_SIZE],
-            permitted: vec![0; DATA_SIZE],
-            inheritable: vec![0; DATA_SIZE],
-        };
+        let mut ret = Cap::default();
 
         for n in 0..DATA_SIZE {
             ret.effective[n] = data[n].effective;
@@ -84,33 +80,25 @@ impl Cap {
 
     /// Copy permitted mask to effective mask
     pub fn activate(&mut self) -> &mut Self {
-        for i in 0..self.effective.len() {
-            self.effective[i] = self.permitted[i];
-        }
+        self.effective = self.permitted;
         self
     }
 
     /// Clear all bits in the effective mask
     pub fn clear_effective(&mut self) -> &mut Self {
-        for i in 0..self.effective.len() {
-            self.effective[i] = 0;
-        }
+        self.effective = [0; DATA_SIZE];
         self
     }
 
     /// Clear all bits in the permitted mask
     pub fn clear_permitted(&mut self) -> &mut Self {
-        for i in 0..self.permitted.len() {
-            self.permitted[i] = 0;
-        }
+        self.permitted = [0; DATA_SIZE];
         self
     }
 
     /// Clear all bits in the inheritable mask
     pub fn clear_inheritable(&mut self) -> &mut Self {
-        for i in 0..self.inheritable.len() {
-            self.inheritable[i] = 0;
-        }
+        self.inheritable = [0; DATA_SIZE];
         self
     }
 
