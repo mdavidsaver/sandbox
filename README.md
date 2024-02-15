@@ -62,14 +62,16 @@ sudo install -m 04775 \
 Building with [packaged dependencies on Debian](https://wiki.debian.org/Rust)
 
 ```sh
-sudo apt install cargo \
-  librust-libc+rustc-dep-of-std-dev \
-  librust-log-dev \
-  librust-signal-hook-dev \
-  librust-bindgen-dev
+sudo apt-get -y install cargo \
+    librust-libc+rustc-dep-of-std-dev \
+    librust-log-dev \
+    librust-pretty-env-logger-dev \
+    librust-signal-hook-dev \
+    librust-bindgen-dev
 
 git clone https://github.com/mdavidsaver/sandbox
 cd sandbox
+
 mkdir .cargo
 cat <<EOF > .cargo/config
 # see https://wiki.debian.org/Rust
@@ -79,7 +81,7 @@ directory = "/usr/share/cargo/registry"
 [source.crates-io]
 replace-with = "debian-packages"
 EOF
-```
+
 cargo test
 ```
 
