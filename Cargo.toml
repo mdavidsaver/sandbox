@@ -16,4 +16,4 @@ bindgen = "0.59"
 libc = "0.2"
 signal-hook = "0.3"
 log = { version = "0.4", features = ["std"] }
-env_logger = "0.10"
+pretty_env_logger = "0"

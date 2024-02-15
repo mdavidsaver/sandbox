@@ -38,7 +38,7 @@ impl ContainerHooks for NoNet {
 }
 
 fn main() -> Result<(), Error> {
-    env_logger::init();
+    pretty_env_logger::init();
 
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len() <= 1 {
