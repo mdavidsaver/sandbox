@@ -6,8 +6,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build and Test
+  crates-io:
+    name: With crates.io
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -17,3 +17,35 @@ jobs:
       run: cargo test --verbose
     - name: rustfmt check
       run: cargo fmt --check --verbose
+
+  debian:
+    name: Debian packaged
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12
+    steps:
+    - uses: actions/checkout@v4
+    - name: Debian deps
+      run: |
+        apt-get update
+        apt-get -y install cargo \
+            librust-libc+rustc-dep-of-std-dev \
+            librust-log-dev \
+            librust-pretty-env-logger-dev \
+            librust-signal-hook-dev \
+            librust-bindgen-dev
+    - name: cargo setup
+      run: |
+        mkdir .cargo
+        cat <<EOF > .cargo/config
+        # see https://wiki.debian.org/Rust
+        [source]
+        [source.debian-packages]
+        directory = "/usr/share/cargo/registry"
+        [source.crates-io]
+        replace-with = "debian-packages"
+        EOF
+    - name: Build
+      run: cargo build --verbose
+    - name: Test
+      run: cargo test --verbose

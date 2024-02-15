@@ -124,9 +124,14 @@ impl Mounts {
         let root = liter.next().ok_or(Error::BadStr)?.into();
         let mount_point = liter.next().ok_or(Error::BadStr)?.into();
         let opts = liter.next().ok_or(Error::BadStr)?;
-        while liter.peek().is_some_and(|p| p != &"-") {
-            // ignore optional fields
-            liter.next().unwrap();
+        loop {
+            if let Some(next) = liter.peek() {
+                if next == &"-" {
+                    // end of option fields
+                    break;
+                }
+                liter.next().unwrap();
+            }
         }
         let sep = liter.next().ok_or(Error::BadStr)?;
         debug_assert_eq!(sep, "-");

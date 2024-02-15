@@ -29,6 +29,60 @@ Run a command with no network access.  Only a loopback interface.
 
 Should be installed with SUID set.
 
+## Building
+
+```sh
+git clone https://github.com/mdavidsaver/sandbox
+cd sandbox
+```
+
+```sh
+cargo test
+cargo build
+```
+
+Or for fully static executables.
+Suggested when installing with SUID.
+
+```sh
+cargo test --release --target x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+Install
+
+```sh
+sudo install -m 04775 \
+  target/x86_64-unknown-linux-musl/release/{hidehome,nonet,isolate} \
+  /usr/local/bin/
+```
+
+### Building on Debian
+
+Building with [packaged dependencies on Debian](https://wiki.debian.org/Rust)
+
+```sh
+sudo apt install cargo \
+  librust-libc+rustc-dep-of-std-dev \
+  librust-log-dev \
+  librust-signal-hook-dev \
+  librust-bindgen-dev
+
+git clone https://github.com/mdavidsaver/sandbox
+cd sandbox
+mkdir .cargo
+cat <<EOF > .cargo/config
+# see https://wiki.debian.org/Rust
+[source]
+[source.debian-packages]
+directory = "/usr/share/cargo/registry"
+[source.crates-io]
+replace-with = "debian-packages"
+EOF
+```
+cargo test
+```
+
 ## Debug
 
 ```
