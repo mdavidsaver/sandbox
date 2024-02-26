@@ -38,7 +38,7 @@ impl ContainerHooks for NoNet {
 }
 
 fn main() -> Result<(), Error> {
-    pretty_env_logger::init();
+    sandbox::logging::setup().unwrap();
 
     let rawargs = env::args().collect::<Vec<String>>();
     if rawargs.len() <= 1 {

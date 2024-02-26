@@ -225,7 +225,7 @@ eg. prevent a build from accidentally changing files outside of the build direct
 }
 
 fn main() -> Result<(), Error> {
-    pretty_env_logger::init();
+    sandbox::logging::setup().unwrap();
 
     let cwd = env::current_dir()?.canonicalize()?;
     if !cwd.is_absolute() {

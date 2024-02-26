@@ -22,4 +22,5 @@ pub use container::runc;
 pub use container::ContainerHooks;
 pub use container::{Error, Result};
 
+pub mod logging;
 pub mod util;

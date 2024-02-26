@@ -65,7 +65,6 @@ Building with [packaged dependencies on Debian](https://wiki.debian.org/Rust)
 sudo apt-get -y install cargo \
     librust-libc+rustc-dep-of-std-dev \
     librust-log-dev \
-    librust-pretty-env-logger-dev \
     librust-signal-hook-dev \
     librust-bindgen-dev
 
