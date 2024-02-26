@@ -16,3 +16,15 @@ bindgen = "0"
 libc = "0.2"
 signal-hook = "0.3"
 log = { version = "0.4", features = ["std"] }
+
+[profile.squeeze]
+inherits = "release"
+# optimize for small code size
+opt-level = "s"
+# link time optimization
+lto = true
+# avoid unwinding machinary
+# libunwind still linked.  cf. https://github.com/rust-lang/rust/issues/79609
+panic = 'abort'
+# keep runtime safety checks
+overflow-checks = true
