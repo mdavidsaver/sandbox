@@ -257,6 +257,7 @@ pub fn configure_lo() -> Result<()> {
 }
 
 /// A "dummy" software ethernet bridge
+#[allow(dead_code)]
 pub struct Bridge(proc::Proc);
 
 /// Add a broadcast capable bridge with a dummy tun interface.

@@ -9,7 +9,7 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .header("external.h")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .derive_default(true)
         .allowlist_type("cap_user_header_t")
         .allowlist_type("cap_user_data_t")
