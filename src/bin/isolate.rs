@@ -18,6 +18,7 @@ const TMPOPT: libc::c_ulong = libc::MS_NODEV | libc::MS_NOSUID | libc::MS_RELATI
 enum MountType {
     ReadOnly,
     Writable,
+    Tmp,
 }
 
 struct Isolate<'a> {
@@ -134,6 +135,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
         util::mount("none", path!(&new_root, "var", "tmp"), "tmpfs", TMPOPT)?;
 
         // user binds
+        // first do any RO/W binds
         for (mtype, dir) in &self.mounts {
             let tdir = path!(&new_root, dir.strip_prefix("/")?);
             log::debug!("Bind as {mtype:?}: {}", dir.display());
@@ -166,6 +168,17 @@ impl<'a> ContainerHooks for Isolate<'a> {
 
                     util::mount(&dir, tdir, "", libc::MS_BIND)?;
                 }
+                MountType::Tmp => {} // handle below
+            }
+        }
+        // now overlay with any tmpfs binds
+        for (mtype, dir) in &self.mounts {
+            let tdir = path!(&new_root, dir.strip_prefix("/")?);
+            match mtype {
+                MountType::Tmp => {
+                    util::mount("", &tdir, "tmpfs", libc::MS_NODEV | libc::MS_NOSUID)?;
+                }
+                _ => {}
             }
         }
 
@@ -216,6 +229,7 @@ Options:
     -c --no-pwd    - Deny writes to $PWD  (shorthand for \"-O .\")
     -W --rw <dir>  - Allow writes to part of the directory tree
     -O --ro <dir>  - Deny writes to part of the directory tree
+    -T --tmp <dir> - Bind empty tmpfs to a directory
 
 eg. prevent a build from accidentally changing files outside of the build directory.
   $ isolate make
@@ -250,11 +264,21 @@ fn main() -> Result<(), Error> {
             allownet = true;
         } else if arg == "-c" || arg == "--no-pwd" {
             mounts.push((MountType::ReadOnly, cwd.clone()));
-        } else if arg == "-W" || arg == "--rw" || arg == "-O" || arg == "--ro" {
+        } else if arg == "-W"
+            || arg == "--rw"
+            || arg == "-O"
+            || arg == "--ro"
+            || arg == "-T"
+            || arg == "--tmp"
+        {
             let mtype = if arg == "-O" || arg == "--ro" {
                 MountType::ReadOnly
-            } else {
+            } else if arg == "-W" || arg == "--rw" {
                 MountType::Writable
+            } else if arg == "-T" || arg == "--tmp" {
+                MountType::Tmp
+            } else {
+                unreachable!();
             };
 
             let dir: PathBuf = iargs
