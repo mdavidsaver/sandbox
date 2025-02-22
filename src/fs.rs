@@ -112,18 +112,19 @@ impl Mounts {
 
     fn parse_line(line: &str) -> Result<MountInfo> {
         let mut liter = line.split_ascii_whitespace().peekable();
+        let mut lnext = || liter.next().ok_or(Error::BadStr);
 
         // cf. Documentation/filesystems/proc.rst
         // lines like:
         // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
         // (0)(1)(2)   (3)   (4)      (5)      (6)   (7) (8)   (9)          (10)
         // where (6) may be repeated zero or more times.
-        let id = liter.next().ok_or(Error::BadStr)?.parse::<_>()?;
-        let _parent_id = liter.next().ok_or(Error::BadStr)?;
-        let _dev = liter.next().ok_or(Error::BadStr)?;
-        let root = liter.next().ok_or(Error::BadStr)?.into();
-        let mount_point = liter.next().ok_or(Error::BadStr)?.into();
-        let opts = liter.next().ok_or(Error::BadStr)?;
+        let id = lnext()?.parse::<_>()?;
+        let _parent_id = lnext()?;
+        let _dev = lnext()?;
+        let root = lnext()?.into();
+        let mount_point = lnext()?.into();
+        let opts = lnext()?;
         loop {
             if let Some(next) = liter.peek() {
                 if next == &"-" {
@@ -133,11 +134,12 @@ impl Mounts {
                 liter.next().unwrap();
             }
         }
-        let sep = liter.next().ok_or(Error::BadStr)?;
+        let mut lnext = || liter.next().ok_or(Error::BadStr); // recreate after skip
+        let sep = lnext()?;
         debug_assert_eq!(sep, "-");
-        let fstype = liter.next().ok_or(Error::BadStr)?.into();
-        let source = liter.next().ok_or(Error::BadStr)?.into();
-        let _sopts = liter.next().ok_or(Error::BadStr)?;
+        let fstype = lnext()?.into();
+        let source = lnext()?.into();
+        let _sopts = lnext()?;
         if liter.peek().is_some() {
             debug!("Ignoring extra mountinfo {:?}", line);
         }
