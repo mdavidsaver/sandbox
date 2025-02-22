@@ -67,7 +67,7 @@ pub struct MountInfo {
     // major:minor
     pub root: PathBuf,
     pub mount_point: PathBuf,
-    pub options: u64,
+    pub options: libc::c_ulong,
     // optional fields
     pub fstype: String,
     pub source: String,
