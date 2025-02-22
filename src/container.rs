@@ -38,7 +38,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///        |   \- waitpid() # child waits for grandchild
 ///        \- waitpid() # parent waits for child
 /// ```
-#[allow(unused_variables)]
 pub trait ContainerHooks {
     /// Called in parent process before child is forked
     fn at_start(&self) -> Result<()> {
@@ -49,7 +48,7 @@ pub trait ContainerHooks {
         Ok(())
     }
     /// Called from parent when time to set child uid/gid_map.
-    fn set_id_map(&self, pid: &Proc) -> Result<()> {
+    fn set_id_map(&self, _pid: &Proc) -> Result<()> {
         Ok(())
     }
     /// Called from grandchild with full privilege (all capabilities)
