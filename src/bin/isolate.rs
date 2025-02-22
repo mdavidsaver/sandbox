@@ -202,6 +202,7 @@ impl<'a> ContainerHooks for Isolate<'a> {
     }
 
     fn setup(&self) -> Result<(), Error> {
+        log::debug!("chdir({:?})", self.cwd);
         env::set_current_dir(&self.cwd)?;
 
         log::debug!("EXEC {:?}", &self.args[0..]);
@@ -224,8 +225,9 @@ Execute command in an isolated environment.  By default only $PWD
 will be writable, with no network access allowed.
 
 Options:
-    -h             - Show this message
+    -h --help      - Show this message
     -N --net       - Allow network access
+    -C --chdir     - Switch $PWD
     -c --no-pwd    - Deny writes to $PWD  (shorthand for \"-O .\")
     -W --rw <dir>  - Allow writes to part of the directory tree
     -O --ro <dir>  - Deny writes to part of the directory tree
@@ -241,7 +243,7 @@ eg. prevent a build from accidentally changing files outside of the build direct
 fn main() -> Result<(), Error> {
     sandbox::logging::setup().unwrap();
 
-    let cwd = env::current_dir()?.canonicalize()?;
+    let mut cwd = env::current_dir()?.canonicalize()?;
     if !cwd.is_absolute() {
         eprintln!("curdir is not absolute?!?");
         process::exit(2);
@@ -252,6 +254,7 @@ fn main() -> Result<(), Error> {
     let mut mounts = vec![];
 
     // order first, so the any subsequent -O ./whatever take precedence
+    // overwritten below after processing -C
     mounts.push((MountType::Writable, cwd.clone()));
 
     while let Some(arg) = iargs.peek() {
@@ -259,6 +262,7 @@ fn main() -> Result<(), Error> {
             break;
         }
         let arg = iargs.next().unwrap();
+        let mut argval = || iargs.next().expect(&format!("{arg} expects argument"));
 
         if arg == "-n" || arg == "-N" || arg == "--net" {
             allownet = true;
@@ -281,16 +285,16 @@ fn main() -> Result<(), Error> {
                 unreachable!();
             };
 
-            let dir: PathBuf = iargs
-                .next()
-                .expect(&format!("{arg} expects argument"))
-                .into();
+            let dir: PathBuf = argval().into();
             if dir.is_dir() {
                 mounts.push((mtype, dir.canonicalize()?));
             } else {
                 log::warn!("Ignore non-existant directory: {arg} {}", dir.display());
             }
-        } else if arg == "-h" {
+        } else if arg == "-C" || arg == "--chdir" {
+            let dir: PathBuf = argval().into();
+            cwd = dir.canonicalize()?;
+        } else if arg == "-h" || arg == "--help" {
             usage();
             return Ok(());
         } else {
@@ -299,6 +303,8 @@ fn main() -> Result<(), Error> {
             process::exit(1);
         }
     }
+
+    mounts[0] = (MountType::Writable, cwd.clone());
 
     // remove duplicates in favor of last
     let mounts = {
@@ -330,7 +336,7 @@ fn main() -> Result<(), Error> {
         args: rawargs,
         tdir: tdir.path(),
         mounts,
-        cwd: env::current_dir()?,
+        cwd,
         bridge: std::cell::Cell::new(None),
     };
 
