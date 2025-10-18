@@ -157,6 +157,7 @@ impl Mounts {
                 "nodiratime" => options |= libc::MS_NODIRATIME,
                 "relatime" => options |= libc::MS_RELATIME,
                 "strictatime" => options |= libc::MS_STRICTATIME,
+                "nosymfollow" => options |= libc::MS_NOSYMFOLLOW,
                 _ => warn!("For {:?} ignore unknown option {:?}", opts, opt),
             }
         }
