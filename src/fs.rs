@@ -10,6 +10,9 @@ use log::{debug, warn};
 
 use super::err::{Error, Result};
 
+// not yet available in libc
+const MS_NOSYMFOLLOW: libc::c_ulong = 0x100;
+
 // like vec!() for a PathBuf
 #[macro_export]
 macro_rules! path {
@@ -157,7 +160,7 @@ impl Mounts {
                 "nodiratime" => options |= libc::MS_NODIRATIME,
                 "relatime" => options |= libc::MS_RELATIME,
                 "strictatime" => options |= libc::MS_STRICTATIME,
-                "nosymfollow" => options |= libc::MS_NOSYMFOLLOW,
+                "nosymfollow" => options |= MS_NOSYMFOLLOW,
                 _ => warn!("For {:?} ignore unknown option {:?}", opts, opt),
             }
         }
