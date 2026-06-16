@@ -232,6 +232,7 @@ Options:
     -W --rw <dir>  - Allow writes to part of the directory tree
     -O --ro <dir>  - Deny writes to part of the directory tree
     -T --tmp <dir> - Bind empty tmpfs to a directory
+    -d             - Make more noise
 
 eg. prevent a build from accidentally changing files outside of the build directory.
   $ isolate make
@@ -294,6 +295,8 @@ fn main() -> Result<(), Error> {
         } else if arg == "-C" || arg == "--chdir" {
             let dir: PathBuf = argval().into();
             cwd = dir.canonicalize()?;
+        } else if arg == "-d" || arg == "--debug" {
+            log::set_max_level(log::LevelFilter::Debug);
         } else if arg == "-h" || arg == "--help" {
             usage();
             return Ok(());
