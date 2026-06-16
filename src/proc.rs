@@ -65,6 +65,7 @@ impl Proc {
         }
 
         let mut signals = Signals::new(&[
+            signal_hook::consts::SIGHUP,
             signal_hook::consts::SIGTERM,
             signal_hook::consts::SIGINT,
             signal_hook::consts::SIGQUIT,
